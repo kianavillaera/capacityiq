@@ -1,6 +1,43 @@
-*.xlsx
-*.csv
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*_executed.ipynb
+
+# ML artefacts (main branch)
 saved_models/
 shap_outputs/
 predictions/
+
+# Output files
+output/
+outputs/reports/
+outputs/exports/
+
+# Data files — not committed
+*.csv
+*.xlsx
+*.xls
 data/
+
+# Approved user mapping (reviewed — optionally committed per team preference)
+user_mapping_approved.xlsx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# mutmut
+.mutmut-cache
+mutants/
