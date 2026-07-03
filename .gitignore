@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*_executed.ipynb
+
+# Output files (timestamped runs — not source)
+output/
+
+# Approved user mapping (reviewed artifact, not source)
+user_mapping_approved.xlsx
+
+# Data files (source inputs — not committed)
+*.csv
+*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
