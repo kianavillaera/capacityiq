@@ -2,3 +2,5 @@
 *.csv
 saved_models/
 shap_outputs/
+predictions/
+data/
