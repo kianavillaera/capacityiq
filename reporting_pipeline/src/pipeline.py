@@ -21,10 +21,11 @@ from config.settings import (
     TIMESTAMP,
     REPORTS_DIR,
     EXPORTS_DIR,
+    SHAREPOINT_REPORTS_DIR,
 )
 from src import loaders, validators, transformations, reconciliation as recon_engine
 from src import exporters, fte_prep, report_generator, mappings
-from src.utils import timer, rotate_to_history
+from src.utils import timer, rotate_to_history, publish_to_sharepoint
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,10 @@ def run_fte_pipeline(
 
         exporters.export_fte_workbook(fte_results, fte_output)
         exporters.export_timecard_data(df, tc_output)
+
+        # Mirror to SharePoint if configured
+        publish_to_sharepoint(fte_output, SHAREPOINT_REPORTS_DIR, timestamp)
+        publish_to_sharepoint(tc_output,  SHAREPOINT_REPORTS_DIR, timestamp)
 
         fte_results["output_paths"] = {
             "powerbi_fte": fte_output,
@@ -454,6 +459,8 @@ def run_monthly_attendance_pipeline(
             week_rosters, month_label, hours_threshold, month_threshold,
             sub_period_rosters=sub_period_rosters or None,
         )
+        # Mirror to SharePoint if configured
+        publish_to_sharepoint(output_path, SHAREPOINT_REPORTS_DIR, timestamp)
 
     logger.info("Monthly attendance pipeline complete: %s", output_path)
 

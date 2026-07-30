@@ -56,7 +56,15 @@ FTE_BAND: tuple = tuple(json.loads(os.getenv("FTE_BAND", "[100, 119]")))
 
 # Technology names from the time-card export mapped to Power BI report groups.
 # JSON object loaded from .env so the client's tech stack is not in source control.
-TECH_MAP: dict = json.loads(os.getenv("TECH_MAP", "{}"))# ──────────────────────────────────────────────────────────────────────────────
+TECH_MAP: dict = json.loads(os.getenv("TECH_MAP", "{}"))
+
+# Optional SharePoint / OneDrive sync folder (WSL path).
+# When set, compliance and FTE reports are also copied here after local generation.
+# Old files in that folder are archived to history/ automatically.
+# Leave empty for local-only mode.
+_sp_raw = os.getenv("SHAREPOINT_REPORTS_DIR", "").strip()
+SHAREPOINT_REPORTS_DIR: "Path | None" = Path(_sp_raw) if _sp_raw else None
+# ──────────────────────────────────────────────────────────────────────────────
 
 # If this file exists it overrides the auto-generated fuzzy matches.
 # Export the auto-generated mapping, correct any wrong rows, save under

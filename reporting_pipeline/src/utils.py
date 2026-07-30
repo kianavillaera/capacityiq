@@ -67,3 +67,38 @@ def rotate_to_history(path: Path, timestamp: str | None = None) -> None:
     dest = history_dir / f"{path.stem}_{ts}{path.suffix}"
     path.rename(dest)
     logger.info("Archived to history: %s → history/%s", path.name, dest.name)
+
+
+def publish_to_sharepoint(local_path: Path,
+                           sharepoint_dir: "Path | None",
+                           timestamp: str | None = None) -> "Path | None":
+    """Copy *local_path* to *sharepoint_dir*, archiving any existing file first.
+
+    Applies the same history-rotation logic as :func:`rotate_to_history` so
+    the SharePoint folder always contains the latest file under a fixed name
+    while previous versions are preserved in ``sharepoint_dir/history/``.
+
+    Returns the destination path on success, or ``None`` if *sharepoint_dir*
+    is not configured or not accessible (logged as a warning, never raises).
+    """
+    import shutil
+
+    if not sharepoint_dir:
+        return None
+    sharepoint_dir = Path(sharepoint_dir)
+    if not sharepoint_dir.exists():
+        logger.warning(
+            "SharePoint dir not accessible — skipping publish: %s", sharepoint_dir
+        )
+        return None
+
+    dest = sharepoint_dir / Path(local_path).name
+    rotate_to_history(dest, timestamp)          # archive old copy first
+
+    try:
+        shutil.copy2(local_path, dest)
+        logger.info("Published to SharePoint: %s", dest)
+        return dest
+    except Exception as exc:
+        logger.warning("SharePoint publish failed (%s): %s", exc, dest)
+        return None
