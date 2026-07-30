@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -23,7 +22,15 @@ SHEET_FILL_WEEKLY = {
     "incomplete_loggers": PatternFill("solid", fgColor="FFF2CC"),
     "orphan_tc_users": PatternFill("solid", fgColor="E2EFDA"),
 }
-ROSTER_META = ["Name", "Pod", "Technology", "Specialisation", "Seniority", "Location", "Email"]
+ROSTER_META = [
+    "Name",
+    "Pod",
+    "Technology",
+    "Specialisation",
+    "Seniority",
+    "Location",
+    "Email",
+]
 
 
 def _month_slug(month_label: str) -> str:
@@ -32,6 +39,7 @@ def _month_slug(month_label: str) -> str:
     Examples: 'Jun 2026' → 'jun', 'Jul 2026' → 'jul', 'July 2026' → 'july'.
     """
     import re
+
     return re.sub(r"[^\w]", "_", month_label.strip().split()[0]).lower().strip("_")
 
 
@@ -47,9 +55,7 @@ def _is_exception(name: str, exceptions: list) -> bool:
     parts = str(name).split(",", 1)
     first = (parts[1] if len(parts) > 1 else parts[0]).strip().lower()
     return any(
-        exc.strip().lower() == first
-        or exc.strip().lower() in first
-        or first in exc.strip().lower()
+        exc.strip().lower() == first or exc.strip().lower() in first or first in exc.strip().lower()
         for exc in exceptions
     )
 
@@ -60,7 +66,7 @@ def build_weekly_attendance(
     resources_matched: pd.DataFrame,
     week: pd.Timestamp,
     hours_threshold: int = 40,
-    partial_hours_exceptions: Optional[list] = None,
+    partial_hours_exceptions: list | None = None,
 ) -> tuple:
     """Build attendance stats for a single week. Returns (roster, orphans, ghost, incomplete, full, day_cols)."""
     week_dates = [week + pd.Timedelta(days=i) for i in range(7)]
@@ -90,18 +96,25 @@ def build_weekly_attendance(
 
     task_hrs = (
         tc_week[~tc_week["is_gen"] & (tc_week["Category"] == "Task work")]
-        .groupby("_uid")["Time worked"].sum().round(2).rename("hours_task")
+        .groupby("_uid")["Time worked"]
+        .sum()
+        .round(2)
+        .rename("hours_task")
     )
-    gen_hrs = tc_week[tc_week["is_gen"]].groupby("_uid")["Time worked"].sum().round(2).rename("hours_gen")
+    gen_hrs = (
+        tc_week[tc_week["is_gen"]].groupby("_uid")["Time worked"].sum().round(2).rename("hours_gen")
+    )
     other_hrs = (
         tc_week[~tc_week["is_gen"] & (tc_week["Category"] != "Task work")]
-        .groupby("_uid")["Time worked"].sum().round(2).rename("hours_other")
+        .groupby("_uid")["Time worked"]
+        .sum()
+        .round(2)
+        .rename("hours_other")
     )
     oncall_hrs = tc_oncall_week.groupby("_uid")["Time worked"].sum().round(2).rename("hours_oncall")
 
     per_uid = (
-        per_uid
-        .join(task_hrs, on="_uid")
+        per_uid.join(task_hrs, on="_uid")
         .join(gen_hrs, on="_uid")
         .join(other_hrs, on="_uid")
         .join(oncall_hrs, on="_uid")
@@ -113,18 +126,26 @@ def build_weekly_attendance(
         .merge(per_uid.rename(columns={"_uid": "tc_uid"}), on="tc_uid", how="left")
         .drop(columns="tc_uid")
     )
-    for c in ["hours_logged", "hours_task", "hours_gen", "hours_other", "hours_oncall"] + day_cols:
+    for c in [
+        "hours_logged",
+        "hours_task",
+        "hours_gen",
+        "hours_other",
+        "hours_oncall",
+    ] + day_cols:
         roster[c] = roster[c].fillna(0)
 
     orphans = per_uid[~per_uid["_uid"].isin(resources_matched["tc_uid"].dropna())]
 
-    ghost = roster[roster["hours_logged"] == 0][
-        ROSTER_META + ["hours_oncall"]
-    ].reset_index(drop=True)
+    ghost = roster[roster["hours_logged"] == 0][ROSTER_META + ["hours_oncall"]].reset_index(
+        drop=True
+    )
 
     _exc_mask = roster["Name"].apply(lambda n: _is_exception(n, partial_hours_exceptions or []))
     incomplete = (
-        roster[(roster["hours_logged"] > 0) & (roster["hours_logged"] < hours_threshold) & ~_exc_mask]
+        roster[
+            (roster["hours_logged"] > 0) & (roster["hours_logged"] < hours_threshold) & ~_exc_mask
+        ]
         .copy()
         .assign(shortfall=lambda d: (hours_threshold - d["hours_logged"]).round(2))
         .sort_values("shortfall", ascending=False)
@@ -145,6 +166,7 @@ def build_weekly_attendance(
 
     return roster, orphans, ghost, incomplete, full, day_cols
 
+
 def build_monthly_attendance(
     tc: pd.DataFrame,
     tc_oncall: pd.DataFrame,
@@ -152,7 +174,7 @@ def build_monthly_attendance(
     weeks: list,
     month_threshold: int = 200,
     hours_threshold: int = 40,
-    partial_hours_exceptions: Optional[list] = None,
+    partial_hours_exceptions: list | None = None,
 ) -> tuple:
     """Build monthly attendance stats (all weeks combined). Returns (roster, orphans, ghost, incomplete, full, wk_cols)."""
     wk_cols = []
@@ -161,8 +183,7 @@ def build_monthly_attendance(
         col = "Wk_" + w.strftime("%d%b")
         wk_cols.append(col)
         week_series[col] = (
-            tc[tc["week_start"] == w].groupby("_uid")["Time worked"]
-            .sum().round(2).rename(col)
+            tc[tc["week_start"] == w].groupby("_uid")["Time worked"].sum().round(2).rename(col)
         )
 
     per_uid = (
@@ -182,18 +203,23 @@ def build_monthly_attendance(
 
     task_hrs = (
         tc[~tc["is_gen"] & (tc["Category"] == "Task work")]
-        .groupby("_uid")["Time worked"].sum().round(2).rename("hours_task")
+        .groupby("_uid")["Time worked"]
+        .sum()
+        .round(2)
+        .rename("hours_task")
     )
     gen_hrs = tc[tc["is_gen"]].groupby("_uid")["Time worked"].sum().round(2).rename("hours_gen")
     other_hrs = (
         tc[~tc["is_gen"] & (tc["Category"] != "Task work")]
-        .groupby("_uid")["Time worked"].sum().round(2).rename("hours_other")
+        .groupby("_uid")["Time worked"]
+        .sum()
+        .round(2)
+        .rename("hours_other")
     )
     oncall_hrs = tc_oncall.groupby("_uid")["Time worked"].sum().round(2).rename("hours_oncall")
 
     per_uid = (
-        per_uid
-        .join(task_hrs, on="_uid")
+        per_uid.join(task_hrs, on="_uid")
         .join(gen_hrs, on="_uid")
         .join(other_hrs, on="_uid")
         .join(oncall_hrs, on="_uid")
@@ -205,26 +231,33 @@ def build_monthly_attendance(
         .merge(per_uid.rename(columns={"_uid": "tc_uid"}), on="tc_uid", how="left")
         .drop(columns="tc_uid")
     )
-    for c in ["hours_logged", "hours_task", "hours_gen", "hours_other", "hours_oncall", "days_logged"] + wk_cols:
+    for c in [
+        "hours_logged",
+        "hours_task",
+        "hours_gen",
+        "hours_other",
+        "hours_oncall",
+        "days_logged",
+    ] + wk_cols:
         roster[c] = roster[c].fillna(0)
     roster["categories"] = roster["categories"].fillna("")
 
     # How many of the N weeks did each person meet the weekly threshold?
     if wk_cols:
         roster["weeks_compliant"] = (roster[wk_cols] >= hours_threshold).sum(axis=1)
-        roster["weeks_compliant"] = (
-            roster["weeks_compliant"].astype(str) + "/" + str(len(wk_cols))
-        )
+        roster["weeks_compliant"] = roster["weeks_compliant"].astype(str) + "/" + str(len(wk_cols))
 
     orphans = per_uid[~per_uid["_uid"].isin(resources_matched["tc_uid"].dropna())]
 
-    ghost = roster[roster["hours_logged"] == 0][
-        ROSTER_META + ["hours_oncall"]
-    ].reset_index(drop=True)
+    ghost = roster[roster["hours_logged"] == 0][ROSTER_META + ["hours_oncall"]].reset_index(
+        drop=True
+    )
 
     _exc_mask = roster["Name"].apply(lambda n: _is_exception(n, partial_hours_exceptions or []))
     incomplete = (
-        roster[(roster["hours_logged"] > 0) & (roster["hours_logged"] < month_threshold) & ~_exc_mask]
+        roster[
+            (roster["hours_logged"] > 0) & (roster["hours_logged"] < month_threshold) & ~_exc_mask
+        ]
         .copy()
         .assign(shortfall=lambda d: (month_threshold - d["hours_logged"]).round(2))
         .sort_values("shortfall", ascending=False)
@@ -244,20 +277,15 @@ def build_monthly_attendance(
 
     return roster, orphans, ghost, incomplete, full, wk_cols
 
+
 def _build_full_roster(
     roster: pd.DataFrame,
     threshold: int,
     time_cols: list,
-    partial_hours_exceptions: Optional[list] = None,
+    partial_hours_exceptions: list | None = None,
 ) -> pd.DataFrame:
     """Build the full sorted roster DataFrame with status and shortfall columns."""
     base_cols = [c for c in ROSTER_META if c in roster.columns]
-    hour_cols = [
-        c for c in ["hours_logged", "hours_task", "hours_gen", "hours_other",
-                     "hours_oncall", "shortfall", "days_logged", "weeks_compliant",
-                     "categories"]
-        if c in roster.columns or c == "shortfall"
-    ]
     _exc = partial_hours_exceptions or []
 
     def _status(row) -> str:
@@ -276,15 +304,28 @@ def _build_full_roster(
         roster.assign(
             status=lambda d: d.apply(_status, axis=1),
             shortfall=lambda d: d.apply(_shortfall, axis=1),
-        )[[*base_cols, "status", "hours_logged", "hours_task", "hours_gen",
-           "hours_other", "hours_oncall", "shortfall", "days_logged",
-           *(["weeks_compliant"] if "weeks_compliant" in roster.columns else []),
-           "categories"] + time_cols]
+        )[
+            [
+                *base_cols,
+                "status",
+                "hours_logged",
+                "hours_task",
+                "hours_gen",
+                "hours_other",
+                "hours_oncall",
+                "shortfall",
+                "days_logged",
+                *(["weeks_compliant"] if "weeks_compliant" in roster.columns else []),
+                "categories",
+            ]
+            + time_cols
+        ]
         .assign(_order=lambda d: d["status"].map({"Compliant": 0, "Incomplete": 1, "Ghost": 2}))
         .sort_values(["_order", "hours_logged"])
         .drop(columns="_order")
         .reset_index(drop=True)
     )
+
 
 def _style_sheet(ws, fill=None) -> None:
     for cell in ws[1]:
@@ -295,12 +336,14 @@ def _style_sheet(ws, fill=None) -> None:
             for cell in row:
                 cell.fill = fill
 
+
 def _highlight_oncall_col(ws) -> None:
     for col_idx, cell in enumerate(ws[1], 1):
         if cell.value == "hours_oncall":
             for row_num in range(1, ws.max_row + 1):
                 ws.cell(row=row_num, column=col_idx).fill = ONCALL_FILL
             break
+
 
 def _style_full_roster(ws, status_col_idx: int) -> None:
     for cell in ws[1]:
@@ -312,6 +355,7 @@ def _style_full_roster(ws, status_col_idx: int) -> None:
             for cell in row:
                 cell.fill = fill
     _highlight_oncall_col(ws)
+
 
 def _build_weekly_legend(ws, week_label: str, threshold: int) -> None:
     """Write the legend sheet for a weekly attendance workbook."""
@@ -336,7 +380,11 @@ def _build_weekly_legend(ws, week_label: str, threshold: int) -> None:
     ws.append(["ROW COLOURS (full_roster sheet)", ""])
     ws["A3"].font = SECTION_FONT
     _row("Compliant  (green)", f"hours_logged ≥ {threshold} h", ROW_FILL["Compliant"])
-    _row("Incomplete  (yellow)", f"0 < hours_logged < {threshold} h", ROW_FILL["Incomplete"])
+    _row(
+        "Incomplete  (yellow)",
+        f"0 < hours_logged < {threshold} h",
+        ROW_FILL["Incomplete"],
+    )
     _row("Ghost  (red)", "hours_logged = 0 - nothing logged at all", ROW_FILL["Ghost"])
     ws.append([])
 
@@ -353,17 +401,36 @@ def _build_weekly_legend(ws, week_label: str, threshold: int) -> None:
     ws[f"A{ws.max_row}"].font = SECTION_FONT
     for col, desc in [
         ("status", "Compliant / Incomplete / Ghost"),
-        ("hours_logged", "Total hours logged (task work + GEN + sick/holiday). Excludes on-call."),
-        ("hours_task", "Task work hours only (Category = 'Task work', Task code not starting with GEN)."),
-        ("hours_gen", "GEN overhead hours (Task code starts with GEN). Count toward hours_logged but are not billable."),
-        ("hours_other", "Hours in other categories (Sick/Holiday, Available to work, etc.)."),
-        ("hours_oncall", "On-call hours. Not counted in hours_logged or the 40 h threshold."),
-        ("shortfall", f"{threshold} − hours_logged, clipped to 0 for compliant resources."),
+        (
+            "hours_logged",
+            "Total hours logged (task work + GEN + sick/holiday). Excludes on-call.",
+        ),
+        (
+            "hours_task",
+            "Task work hours only (Category = 'Task work', Task code not starting with GEN).",
+        ),
+        (
+            "hours_gen",
+            "GEN overhead hours (Task code starts with GEN). Count toward hours_logged but are not billable.",
+        ),
+        (
+            "hours_other",
+            "Hours in other categories (Sick/Holiday, Available to work, etc.).",
+        ),
+        (
+            "hours_oncall",
+            "On-call hours. Not counted in hours_logged or the 40 h threshold.",
+        ),
+        (
+            "shortfall",
+            f"{threshold} − hours_logged, clipped to 0 for compliant resources.",
+        ),
         ("days_logged", "Number of distinct calendar days with at least one entry."),
         ("categories", "Pipe-separated list of distinct Category values logged."),
         ("Mon dd/mm … Sun dd/mm", "Hours logged on each day of the 7-day week span."),
     ]:
         _row(col, desc)
+
 
 def write_weekly_attendance_report(
     output_path: Path,
@@ -379,8 +446,14 @@ def write_weekly_attendance_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     orphan_export_cols = [
-        "_uid", "name_tc", "hours_logged", "hours_task",
-        "hours_gen", "hours_other", "hours_oncall", "days_logged",
+        "_uid",
+        "name_tc",
+        "hours_logged",
+        "hours_task",
+        "hours_gen",
+        "hours_other",
+        "hours_oncall",
+        "days_logged",
     ] + day_cols
     orphan_export_cols = [c for c in orphan_export_cols if c in orphans.columns]
 
@@ -403,6 +476,7 @@ def write_weekly_attendance_report(
 
     logger.info("Weekly attendance report written: %s", output_path)
 
+
 def write_monthly_attendance_report(
     output_path: Path,
     full_m: pd.DataFrame,
@@ -414,22 +488,30 @@ def write_monthly_attendance_report(
     month_label: str,
     hours_threshold: int = 40,
     month_threshold: int = 200,
-    sub_period_rosters: Optional[list] = None,  # list of (label, full_df, threshold)
+    sub_period_rosters: list | None = None,  # list of (label, full_df, threshold)
 ) -> None:
     """Write the monthly attendance workbook including per-week sheets."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    orphan_base_cols = ["_uid", "name_tc", "hours_logged", "hours_task",
-                        "hours_gen", "hours_other", "hours_oncall", "days_logged"]
+    orphan_base_cols = [
+        "_uid",
+        "name_tc",
+        "hours_logged",
+        "hours_task",
+        "hours_gen",
+        "hours_other",
+        "hours_oncall",
+        "days_logged",
+    ]
 
     slug = _month_slug(month_label)
-    sheet_full    = f"{slug}_full_roster"
-    sheet_ghost   = f"ghost_{slug}"
-    sheet_inc     = f"incomplete_{slug}"
+    sheet_full = f"{slug}_full_roster"
+    sheet_ghost = f"ghost_{slug}"
+    sheet_inc = f"incomplete_{slug}"
     sheet_orphans = f"orphans_{slug}"
-    sheet_fills   = {
-        sheet_ghost:   PatternFill("solid", fgColor="FFCCCC"),
-        sheet_inc:     PatternFill("solid", fgColor="FFF2CC"),
+    sheet_fills = {
+        sheet_ghost: PatternFill("solid", fgColor="FFCCCC"),
+        sheet_inc: PatternFill("solid", fgColor="FFF2CC"),
         sheet_orphans: PatternFill("solid", fgColor="E2EFDA"),
     }
 
@@ -453,12 +535,10 @@ def write_monthly_attendance_report(
             sheet_label = f"week_{w.date()}"
             full_w = _build_full_roster(roster_w, hours_threshold, day_cols_w)
             full_w.to_excel(writer, sheet_name=sheet_label, index=False)
-            _style_full_roster(
-                writer.sheets[sheet_label], list(full_w.columns).index("status")
-            )
+            _style_full_roster(writer.sheets[sheet_label], list(full_w.columns).index("status"))
 
         # Sub-period full-roster sheets (e.g. June-only, July-only)
-        for sp_label, sp_full, _sp_thresh in (sub_period_rosters or []):
+        for sp_label, sp_full, _sp_thresh in sub_period_rosters or []:
             sp_slug = _month_slug(sp_label)
             sp_sheet = f"{sp_slug}_full_roster"
             sp_full.to_excel(writer, sheet_name=sp_sheet, index=False)
@@ -466,20 +546,37 @@ def write_monthly_attendance_report(
 
         wb = writer.book
         ws_legend = wb.create_sheet("legend")
-        _build_monthly_legend(ws_legend, month_label, slug, hours_threshold, month_threshold, wk_cols, week_rosters, sub_period_rosters)
+        _build_monthly_legend(
+            ws_legend,
+            month_label,
+            slug,
+            month_threshold,
+            wk_cols,
+            week_rosters,
+            sub_period_rosters,
+        )
 
     logger.info("Monthly attendance report written: %s", output_path)
 
-def _build_monthly_legend(ws, month_label, slug, week_threshold, month_threshold, wk_cols, week_rosters, sub_period_rosters=None) -> None:
+
+def _build_monthly_legend(
+    ws,
+    month_label,
+    slug,
+    month_threshold,
+    wk_cols,
+    week_rosters,
+    sub_period_rosters=None,
+) -> None:
     TITLE_FONT = Font(bold=True, size=12)
     SECTION_FONT = Font(bold=True)
     WRAP = Alignment(wrap_text=True, vertical="top")
     ws.column_dimensions["A"].width = 24
     ws.column_dimensions["B"].width = 70
 
-    sheet_full    = f"{slug}_full_roster"
-    sheet_ghost   = f"ghost_{slug}"
-    sheet_inc     = f"incomplete_{slug}"
+    sheet_full = f"{slug}_full_roster"
+    sheet_ghost = f"ghost_{slug}"
+    sheet_inc = f"incomplete_{slug}"
     sheet_orphans = f"orphans_{slug}"
 
     def _row(label, value, label_fill=None):
@@ -495,30 +592,51 @@ def _build_monthly_legend(ws, month_label, slug, week_threshold, month_threshold
 
     ws.append([f"ROW COLOURS ({sheet_full} sheet)", ""])
     ws["A3"].font = SECTION_FONT
-    _row("Compliant (green)", f"hours_logged ≥ {month_threshold} h (whole month)", ROW_FILL["Compliant"])
-    _row("Incomplete (yellow)", f"0 < hours_logged < {month_threshold} h", ROW_FILL["Incomplete"])
-    _row("Ghost (red)", f"hours_logged = 0 for the entire {month_label} period", ROW_FILL["Ghost"])
+    _row(
+        "Compliant (green)",
+        f"hours_logged ≥ {month_threshold} h (whole month)",
+        ROW_FILL["Compliant"],
+    )
+    _row(
+        "Incomplete (yellow)",
+        f"0 < hours_logged < {month_threshold} h",
+        ROW_FILL["Incomplete"],
+    )
+    _row(
+        "Ghost (red)",
+        f"hours_logged = 0 for the entire {month_label} period",
+        ROW_FILL["Ghost"],
+    )
     ws.append([])
 
     ws.append(["AMBER COLUMN", ""])
     ws[f"A{ws.max_row}"].font = SECTION_FONT
-    _row("hours_oncall (amber)", "On-call hours. Excluded from the monthly threshold.", ONCALL_FILL)
+    _row(
+        "hours_oncall (amber)",
+        "On-call hours. Excluded from the monthly threshold.",
+        ONCALL_FILL,
+    )
     ws.append([])
 
     ws.append(["SHEETS", ""])
     ws[f"A{ws.max_row}"].font = SECTION_FONT
     sheets_desc = [
-        (sheet_full,    f"All roster members for {month_label} sorted Compliant, Incomplete, Ghost."),
-        (sheet_ghost,   "Roster members with 0 hours logged for the entire period."),
-        (sheet_inc,     f"0 < hours_logged < {month_threshold} h, sorted by shortfall."),
+        (
+            sheet_full,
+            f"All roster members for {month_label} sorted Compliant, Incomplete, Ghost.",
+        ),
+        (sheet_ghost, "Roster members with 0 hours logged for the entire period."),
+        (sheet_inc, f"0 < hours_logged < {month_threshold} h, sorted by shortfall."),
         (sheet_orphans, "TC users who logged time but are not in the resource roster."),
     ]
-    for sp_label, _sp_full, sp_thresh in (sub_period_rosters or []):
+    for sp_label, _sp_full, sp_thresh in sub_period_rosters or []:
         sp_slug = _month_slug(sp_label)
-        sheets_desc.append((
-            f"{sp_slug}_full_roster",
-            f"{sp_label} only — full roster coloured by compliance status (\u2265 {sp_thresh} h threshold for this period).",
-        ))
+        sheets_desc.append(
+            (
+                f"{sp_slug}_full_roster",
+                f"{sp_label} only — full roster coloured by compliance status (\u2265 {sp_thresh} h threshold for this period).",
+            )
+        )
     for w in sorted(week_rosters.keys()):
         sheets_desc.append((f"week_{w.date()}", f"Per-week detail for week starting {w.date()}."))
     sheets_desc.append(("legend", "This sheet."))

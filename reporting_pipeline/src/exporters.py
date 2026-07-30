@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+
 def to_excel_bytes(results: dict) -> bytes:
     """Serialise reconciliation results to an in-memory Excel workbook (detail + by_user + monthly sheets)."""
     buf = io.BytesIO()
@@ -19,6 +20,7 @@ def to_excel_bytes(results: dict) -> bytes:
         for month, df in results["recon_by_month"].items():
             df.to_excel(writer, sheet_name=month, index=False)
     return buf.getvalue()
+
 
 def export_reconciliation(results: dict, output_dir: Path, timestamp: str) -> dict:
     """Write reconciliation, exception report, user mapping, and summary to disk."""
@@ -49,13 +51,16 @@ def export_reconciliation(results: dict, output_dir: Path, timestamp: str) -> di
 
     return paths
 
+
 def export_fte_workbook(fte_results: dict, output_path: Path) -> None:
     """Write the Power BI FTE workbook with all standard sheets."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        fte_results["tech_weekly_no_gen"].to_excel(writer, sheet_name="tech_weekly_fte", index=False)
+        fte_results["tech_weekly_no_gen"].to_excel(
+            writer, sheet_name="tech_weekly_fte", index=False
+        )
         fte_results["graph1"].to_excel(writer, sheet_name="graph1_total_fte", index=False)
         fte_results["graph2"].to_excel(writer, sheet_name="graph2_task_fte", index=False)
         fte_results["weekly"].to_excel(writer, sheet_name="weekly_breakdown", index=False)
@@ -70,8 +75,10 @@ def export_fte_workbook(fte_results: dict, output_path: Path) -> None:
 
     logger.info("FTE workbook written: %s", output_path)
 
-def export_timecard_data(df: pd.DataFrame, output_path: Path,
-                         oncall_df: "pd.DataFrame | None" = None) -> None:
+
+def export_timecard_data(
+    df: pd.DataFrame, output_path: Path, oncall_df: "pd.DataFrame | None" = None
+) -> None:
     """Export time-card data with two sheets: with_gen and without_gen.
 
     If oncall_df is supplied it is saved to a third 'oncall' sheet so the
@@ -88,15 +95,19 @@ def export_timecard_data(df: pd.DataFrame, output_path: Path,
 
     logger.info(
         "Timecard data written: %s  (with_gen=%d  without_gen=%d  oncall=%d)",
-        output_path, len(df), (~df["is_gen"]).sum(),
+        output_path,
+        len(df),
+        (~df["is_gen"]).sum(),
         len(oncall_df) if oncall_df is not None else 0,
     )
+
 
 def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
     """Serialise a single DataFrame to in-memory Excel bytes."""
     buf = io.BytesIO()
     df.to_excel(buf, index=False)
     return buf.getvalue()
+
 
 def _df_to_excel(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

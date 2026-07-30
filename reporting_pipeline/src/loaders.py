@@ -2,8 +2,8 @@
 
 import io
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Union
 
 import pandas as pd
 
@@ -20,9 +20,11 @@ def _prep_replicon(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
     return df
 
 
-def load_replicon_dir(directory: Union[str, Path]) -> pd.DataFrame:
+def load_replicon_dir(directory: str | Path) -> pd.DataFrame:
     directory = Path(directory)
-    paths = sorted(p for p in directory.iterdir() if p.suffix in (".csv", ".xlsx") and ":" not in p.name)
+    paths = sorted(
+        p for p in directory.iterdir() if p.suffix in (".csv", ".xlsx") and ":" not in p.name
+    )
     if not paths:
         raise ValueError(f"No CSV or XLSX files found in: {directory}")
     frames = [
@@ -38,16 +40,19 @@ def load_replicon_dir(directory: Union[str, Path]) -> pd.DataFrame:
 
 
 def load_replicon_bytes(file_bytes_list: list[tuple[str, bytes]]) -> pd.DataFrame:
-    frames = [_prep_replicon(pd.read_csv(io.BytesIO(data), dtype=str), name) for name, data in file_bytes_list]
+    frames = [
+        _prep_replicon(pd.read_csv(io.BytesIO(data), dtype=str), name)
+        for name, data in file_bytes_list
+    ]
     result = pd.concat(frames, ignore_index=True)
     logger.info("Loaded %d Replicon rows from %d file(s)", len(result), len(frames))
     return result
 
 
-def load_timecard_files(paths: list[Union[str, Path]]) -> pd.DataFrame:
+def load_timecard_files(paths: Sequence[str | Path]) -> pd.DataFrame:
     if not paths:
         raise ValueError("At least one time-card file path is required.")
-    frames = []
+    frames: list[pd.DataFrame] = []
     for p in paths:
         p = Path(p)
         engine = "xlrd" if p.suffix == ".xls" else None
@@ -63,13 +68,13 @@ def load_timecard_bytes(file_bytes: bytes) -> pd.DataFrame:
         return pd.concat([xl.parse(s).assign(_sheet=s) for s in xl.sheet_names], ignore_index=True)
 
 
-def load_resources(path: Union[str, Path], sheet_name: str) -> pd.DataFrame:
+def load_resources(path: str | Path, sheet_name: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name=sheet_name)
     logger.info("Loaded %d resources from %s", len(df), Path(path).name)
     return df
 
 
-def load_approved_mapping(path: Union[str, Path]) -> "pd.DataFrame | None":
+def load_approved_mapping(path: str | Path) -> "pd.DataFrame | None":
     path = Path(path)
     if not path.exists():
         return None
@@ -78,7 +83,7 @@ def load_approved_mapping(path: Union[str, Path]) -> "pd.DataFrame | None":
     return df
 
 
-def load_timecard_multi(paths: list[Union[str, Path]]) -> pd.DataFrame:
+def load_timecard_multi(paths: Sequence[str | Path]) -> pd.DataFrame:
     """Load multiple time-card files for the FTE pipeline. Adds week_start column."""
     frames = []
     for p in paths:

@@ -1,0 +1,5 @@
+[
+  {"username": "Alice Smith", "hours": 8.0, "employee_id": "E001"},
+  {"username": "Bob Jones",   "hours": 0.0, "employee_id": "E002"},
+  {"username": "Carol White", "hours": 7.5, "employee_id": null}
+]

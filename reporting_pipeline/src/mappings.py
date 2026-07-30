@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import Optional
+from typing import Any
 
 import pandas as pd
 
@@ -10,17 +10,20 @@ logger = logging.getLogger(__name__)
 
 try:
     import jellyfish
+
     HAS_JELLYFISH = True
 except ImportError:
-    jellyfish = None
+    jellyfish: Any = None  # type: ignore[no-redef]
     HAS_JELLYFISH = False
 
 try:
     from rapidfuzz import fuzz as _rf
+
     HAS_RAPIDFUZZ = True
 except ImportError:
-    _rf = None
+    _rf: Any = None  # type: ignore[no-redef]
     HAS_RAPIDFUZZ = False
+
 
 def normalise_name(name: str) -> str:
     """Normalise a display name for matching. Handles 'Last, First' format and strips punctuation."""
@@ -35,6 +38,7 @@ def normalise_name(name: str) -> str:
     name = re.sub(r"\s+", " ", name).strip()
     return name
 
+
 def normalise_uid(uid: str) -> str:
     """Normalise a user ID or email for matching. Strips domain, lowercases, replaces separators."""
     if not isinstance(uid, str):
@@ -44,6 +48,7 @@ def normalise_uid(uid: str) -> str:
     uid = re.sub(r"[._\-]", " ", uid)
     uid = re.sub(r"\s+", " ", uid).strip()
     return uid
+
 
 def _best_score(rep_norm: str, sn_norm: str, sn_uid: str) -> tuple:
     # Composite score: 35% Jaro-Winkler + 30% token-sort + 35% token-set.
@@ -71,6 +76,7 @@ def _best_score(rep_norm: str, sn_norm: str, sn_uid: str) -> tuple:
 
     return jw, ts, tst, final
 
+
 def build_user_mapping(
     rep_df: pd.DataFrame,
     sn_df: pd.DataFrame,
@@ -89,20 +95,20 @@ def build_user_mapping(
     rows = []
     for _, rep in rep_df.iterrows():
         rn = rep["norm_name"]
-        record: dict = dict(
-            replicon_username=rep["username"],
-            replicon_employee_id=rep["employee_id"],
-            servicenow_user_id=None,
-            servicenow_name=None,
-            match_method="no_match",
-            jaro_winkler_score=0.0,
-            token_sort_score=0.0,
-            token_set_score=0.0,
-            final_score=0.0,
-            review_required=True,
-            match_status="no_match",
-            notes="",
-        )
+        record: dict = {
+            "replicon_username": rep["username"],
+            "replicon_employee_id": rep["employee_id"],
+            "servicenow_user_id": None,
+            "servicenow_name": None,
+            "match_method": "no_match",
+            "jaro_winkler_score": 0.0,
+            "token_sort_score": 0.0,
+            "token_set_score": 0.0,
+            "final_score": 0.0,
+            "review_required": True,
+            "match_status": "no_match",
+            "notes": "",
+        }
 
         if rn in sn_by_name:
             uid = sn_by_name[rn]
@@ -133,9 +139,7 @@ def build_user_mapping(
             for _, sn_row in sn_df.iterrows():
                 jw, ts, tst, final = _best_score(rn, sn_row["norm_name"], sn_row["norm_uid"])
                 if final >= review_low * 0.70:
-                    candidates.append(
-                        (final, jw, ts, tst, sn_row["sn_user_id"], sn_row["sn_user"])
-                    )
+                    candidates.append((final, jw, ts, tst, sn_row["sn_user_id"], sn_row["sn_user"]))
             if candidates:
                 candidates.sort(reverse=True)
                 final, jw, ts, tst, uid, sn_name = candidates[0]
@@ -176,6 +180,7 @@ def build_user_mapping(
     )
     return mapping
 
+
 def _user_tables(replicon: pd.DataFrame, sn: pd.DataFrame) -> tuple:
     replicon_users = (
         replicon[["username", "employee_id"]]
@@ -194,10 +199,11 @@ def _user_tables(replicon: pd.DataFrame, sn: pd.DataFrame) -> tuple:
     )
     return replicon_users, sn_users
 
+
 def _resolve_mapping(
     replicon_users: pd.DataFrame,
     sn_users: pd.DataFrame,
-    approved: Optional[pd.DataFrame],
+    approved: pd.DataFrame | None,
     auto_accept: float,
     review_low: float,
 ) -> tuple:
@@ -208,7 +214,10 @@ def _resolve_mapping(
         ]
         if not unmatched.empty:
             mapping = pd.concat(
-                [mapping, build_user_mapping(unmatched, sn_users, auto_accept, review_low)],
+                [
+                    mapping,
+                    build_user_mapping(unmatched, sn_users, auto_accept, review_low),
+                ],
                 ignore_index=True,
             )
     else:
@@ -221,16 +230,17 @@ def _resolve_mapping(
         .loc[lambda x: x > 1]
     )
     if not dup_sn.empty:
-        mapping.loc[
-            mapping["servicenow_user_id"].isin(dup_sn.index), "notes"
-        ] = "duplicate_user_candidate"
+        mapping.loc[mapping["servicenow_user_id"].isin(dup_sn.index), "notes"] = (
+            "duplicate_user_candidate"
+        )
 
     return mapping, dup_sn
+
 
 def match_users(
     replicon: pd.DataFrame,
     sn: pd.DataFrame,
-    approved: Optional[pd.DataFrame] = None,
+    approved: pd.DataFrame | None = None,
     auto_accept: float = 0.80,
     review_low: float = 0.70,
 ) -> pd.DataFrame:
@@ -238,6 +248,7 @@ def match_users(
     replicon_users, sn_users = _user_tables(replicon, sn)
     mapping, _ = _resolve_mapping(replicon_users, sn_users, approved, auto_accept, review_low)
     return mapping
+
 
 def match_roster_to_timecard(
     resources: pd.DataFrame,

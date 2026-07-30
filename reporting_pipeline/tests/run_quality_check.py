@@ -60,15 +60,23 @@ if not syntax_ok:
 section("2. Import check")
 import_ok = True
 modules = [
-    "config.settings", "src.utils", "src.loaders", "src.validators",
-    "src.transformations", "src.mappings", "src.reconciliation",
-    "src.exporters", "src.fte_prep", "src.report_generator", "src.pipeline",
+    "config.settings",
+    "src.utils",
+    "src.loaders",
+    "src.validators",
+    "src.transformations",
+    "src.mappings",
+    "src.reconciliation",
+    "src.exporters",
+    "src.fte_prep",
+    "src.report_generator",
+    "src.pipeline",
 ]
 for m in modules:
     try:
         __import__(m)
         print(f"  OK  {m}")
-    except Exception as e:
+    except ImportError as e:
         print(f"  ERR {m}: {e}")
         import_ok = False
 
@@ -81,16 +89,21 @@ if not import_ok:
 # 3. Tests + coverage
 # ---------------------------------------------------------------------------
 section("3. Unit tests + BDD tests + coverage")
-result = run([
-    PYTHON, "-m", "pytest",
-    "tests/",
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=html:outputs/coverage_html",
-    "--cov-fail-under=70",
-    "-v",
-    "--tb=short",
-], cwd=PROJECT_ROOT)
+result = run(
+    [
+        PYTHON,
+        "-m",
+        "pytest",
+        "tests/",
+        "--cov=src",
+        "--cov-report=term-missing",
+        "--cov-report=html:outputs/coverage_html",
+        "--cov-fail-under=70",
+        "-v",
+        "--tb=short",
+    ],
+    cwd=PROJECT_ROOT,
+)
 
 print(result.stdout)
 if result.returncode != 0:
@@ -108,7 +121,7 @@ for line in lines:
     if "TOTAL" in line or "%" in line and "src/" in line:
         print(f"  {line.strip()}")
 
-cov_line = next((l for l in lines if "TOTAL" in l), None)
+cov_line = next((line for line in lines if "TOTAL" in line), None)
 if cov_line:
     try:
         pct = int(cov_line.split()[-1].replace("%", ""))
@@ -128,11 +141,20 @@ if skip_mutation:
 else:
     print("  Running mutmut on src/reconciliation.py and src/mappings.py...")
     print("  (This may take several minutes.)")
-    mut = run([
-        PYTHON, "-m", "mutmut", "run",
-        "--paths-to-mutate", "src/reconciliation.py,src/mappings.py",
-        "--tests-dir", "tests/",
-    ], cwd=PROJECT_ROOT, timeout=300)
+    mut = run(
+        [
+            PYTHON,
+            "-m",
+            "mutmut",
+            "run",
+            "--paths-to-mutate",
+            "src/reconciliation.py,src/mappings.py",
+            "--tests-dir",
+            "tests/",
+        ],
+        cwd=PROJECT_ROOT,
+        timeout=300,
+    )
     print(mut.stdout[-3000:] if len(mut.stdout) > 3000 else mut.stdout)
 
     results_proc = run([PYTHON, "-m", "mutmut", "results"], cwd=PROJECT_ROOT)

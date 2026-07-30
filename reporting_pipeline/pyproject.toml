@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "BLE", "C4", "DTZ", "PIE", "SIM"]
+ignore = [
+    "E501",   # line too long — formatter handles it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["DTZ005", "DTZ001"]   # test timestamps don't need tz
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+pythonpath = ["."]
+
+[tool.mutmut]
+paths_to_mutate = "src/transformations.py,src/mappings.py,src/reconciliation.py,src/report_generator.py,src/utils.py"
+runner = "/home/mabdelhameed2/CIQ/.venv/bin/python -m pytest tests/unit/ -x -q"

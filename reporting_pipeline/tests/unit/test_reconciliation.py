@@ -2,21 +2,13 @@
 Tests for the reconciliation engine.
 """
 
-import sys
-from pathlib import Path
-
 import pandas as pd
-import numpy as np
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.reconciliation import run, classify_exception
-
+from src.reconciliation import classify_exception, run
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
 
 def _make_replicon_raw(rows: list[dict]) -> pd.DataFrame:
     """Build a raw Replicon DataFrame from a list of row dicts."""
@@ -48,6 +40,7 @@ def _make_sn_raw(rows: list[dict]) -> pd.DataFrame:
 
 # ── classify_exception ────────────────────────────────────────────────────────
 
+
 class TestClassifyException:
     def _row(self, **kwargs) -> pd.Series:
         defaults = {
@@ -63,15 +56,21 @@ class TestClassifyException:
         assert exc_type is None
 
     def test_missing_in_replicon(self):
-        exc_type, _ = classify_exception(self._row(hours_replicon=0, hours_servicenow=8, variance=8))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=0, hours_servicenow=8, variance=8)
+        )
         assert exc_type == "missing_in_replicon"
 
     def test_missing_in_servicenow(self):
-        exc_type, _ = classify_exception(self._row(hours_replicon=8, hours_servicenow=0, variance=-8))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=8, hours_servicenow=0, variance=-8)
+        )
         assert exc_type == "missing_in_servicenow"
 
     def test_hours_mismatch(self):
-        exc_type, _ = classify_exception(self._row(hours_replicon=8, hours_servicenow=7, variance=-1))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=8, hours_servicenow=7, variance=-1)
+        )
         assert exc_type == "hours_mismatch"
 
     def test_user_mapping_required(self):
@@ -85,23 +84,38 @@ class TestClassifyException:
 
 # ── run ───────────────────────────────────────────────────────────────────────
 
+
 class TestReconciliationRun:
     def test_returns_dict_with_required_keys(self):
         rep = _make_replicon_raw([{}])
         sn = _make_sn_raw([{"User ID": "testuser"}])
         result = run(rep, sn)
         required_keys = {
-            "replicon", "sn", "sn_in_window", "user_mapping",
-            "replicon_agg", "sn_agg", "recon_table", "recon_by_user",
-            "recon_by_month", "exception_report", "summary",
+            "replicon",
+            "sn",
+            "sn_in_window",
+            "user_mapping",
+            "replicon_agg",
+            "sn_agg",
+            "recon_table",
+            "recon_by_user",
+            "recon_by_month",
+            "exception_report",
+            "summary",
         }
         assert required_keys.issubset(result.keys())
 
     def test_raises_for_empty_replicon(self):
-        rep = pd.DataFrame(columns=[
-            "Entry Date", "User Name", "Employee ID",
-            "Project Code", "Task Code", "Hours",
-        ])
+        rep = pd.DataFrame(
+            columns=[
+                "Entry Date",
+                "User Name",
+                "Employee ID",
+                "Project Code",
+                "Task Code",
+                "Hours",
+            ]
+        )
         sn = _make_sn_raw([{}])
         with pytest.raises(ValueError, match="no usable rows"):
             run(rep, sn)
@@ -110,16 +124,17 @@ class TestReconciliationRun:
         rep = _make_replicon_raw([{"Hours": "8"}])
         sn = _make_sn_raw([{"Time worked": 8, "User ID": "testuser"}])
         result = run(rep, sn)
-        total_variance = result["recon_table"]["variance"].sum()
         # Variance may be non-zero if user is not matched (no_match) — check summary
         assert "net_variance" in result["summary"].set_index("metric")["value"].to_dict()
 
     def test_replicon_hours_tieout(self):
         """Hours before and after aggregation must match."""
-        rep = _make_replicon_raw([
-            {"Hours": "8", "Task Code": "T1"},
-            {"Hours": "4", "Task Code": "T2"},
-        ])
+        rep = _make_replicon_raw(
+            [
+                {"Hours": "8", "Task Code": "T1"},
+                {"Hours": "4", "Task Code": "T2"},
+            ]
+        )
         sn = _make_sn_raw([{"Time worked": 8, "User ID": "testuser"}])
         result = run(rep, sn)
         before = result["replicon"]["hours"].sum()
@@ -164,14 +179,19 @@ class TestReconciliationRun:
         result = run(rep, sn)
         s = result["summary"].set_index("metric")["value"]
         # net_variance = total_SN_after_agg - total_replicon_after_agg
-        expected = float(s["total_servicenow_hours_after_aggregation"]) - float(s["total_replicon_hours_after_aggregation"])
+        expected = float(s["total_servicenow_hours_after_aggregation"]) - float(
+            s["total_replicon_hours_after_aggregation"]
+        )
         assert abs(float(s["net_variance"]) - expected) < 0.01
 
     def test_sn_outside_date_window_excluded(self):
         rep = _make_replicon_raw([{"Entry Date": "01.06.2026"}])
-        sn  = _make_sn_raw([{"Date": "2025-01-01"}])
+        sn = _make_sn_raw([{"Date": "2025-01-01"}])
         result = run(rep, sn)
-        assert int(result["summary"].set_index("metric")["value"]["total_servicenow_rows_in_window"]) == 0
+        assert (
+            int(result["summary"].set_index("metric")["value"]["total_servicenow_rows_in_window"])
+            == 0
+        )
 
     def test_sn_user_not_in_mapping_excluded(self):
         rep = _make_replicon_raw([{}])
@@ -184,14 +204,18 @@ class TestReconciliationRun:
         result = run(_make_replicon_raw([{}]), _make_sn_raw([{}]))
         metrics = set(result["summary"]["metric"])
         for expected in [
-            "net_variance", "total_records_compared", "total_discrepancies",
-            "total_users_matched", "replicon_window_start", "replicon_window_end",
+            "net_variance",
+            "total_records_compared",
+            "total_discrepancies",
+            "total_users_matched",
+            "replicon_window_start",
+            "replicon_window_end",
         ]:
             assert expected in metrics
 
     def test_no_merge_cardinality_error_on_normal_data(self):
         rep = _make_replicon_raw([{"Hours": "8", "Task Code": "T1"}])
-        sn  = _make_sn_raw([{"Time worked": 8, "Project ID": "T1"}])
+        sn = _make_sn_raw([{"Time worked": 8, "Project ID": "T1"}])
         result = run(rep, sn)  # should not raise
         assert result is not None
 
@@ -200,30 +224,40 @@ class TestClassifyExceptionBoundaries:
     """Boundary-condition tests that kill comparison-operator mutants."""
 
     def _row(self, **kwargs) -> pd.Series:
-        return pd.Series({
-            "match_status": "auto_accepted",
-            "hours_replicon": 0.0,
-            "hours_servicenow": 0.0,
-            "variance": 0.0,
-            **kwargs,
-        })
+        return pd.Series(
+            {
+                "match_status": "auto_accepted",
+                "hours_replicon": 0.0,
+                "hours_servicenow": 0.0,
+                "variance": 0.0,
+                **kwargs,
+            }
+        )
 
     def test_missing_in_replicon_requires_sn_hours_strictly_positive(self):
         # hours_servicenow == 0 must NOT trigger missing_in_replicon
-        exc_type, _ = classify_exception(self._row(hours_replicon=0, hours_servicenow=0, variance=0))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=0, hours_servicenow=0, variance=0)
+        )
         assert exc_type is None
 
     def test_missing_in_replicon_with_sn_gt_zero(self):
-        exc_type, _ = classify_exception(self._row(hours_replicon=0, hours_servicenow=0.01, variance=0.01))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=0, hours_servicenow=0.01, variance=0.01)
+        )
         assert exc_type == "missing_in_replicon"
 
     def test_missing_in_servicenow_requires_replicon_hours_strictly_positive(self):
         # hours_replicon == 0 must NOT trigger missing_in_servicenow
-        exc_type, _ = classify_exception(self._row(hours_replicon=0, hours_servicenow=0, variance=0))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=0, hours_servicenow=0, variance=0)
+        )
         assert exc_type is None
 
     def test_missing_in_servicenow_with_replicon_gt_zero(self):
-        exc_type, _ = classify_exception(self._row(hours_replicon=0.01, hours_servicenow=0, variance=-0.01))
+        exc_type, _ = classify_exception(
+            self._row(hours_replicon=0.01, hours_servicenow=0, variance=-0.01)
+        )
         assert exc_type == "missing_in_servicenow"
 
     def test_rejected_status_flags_as_user_mapping_required(self):
@@ -237,11 +271,13 @@ class TestSummaryAccuracy:
     def test_sn_excluded_date_is_rows_outside_replicon_window(self):
         rep = _make_replicon_raw([{"Entry Date": "01.06.2026"}])
         # Two SN rows: one inside (June 1) and two outside (Jan 2025) the window
-        sn = _make_sn_raw([
-            {"Date": "2026-06-01"},
-            {"Date": "2025-01-01"},
-            {"Date": "2025-01-02"},
-        ])
+        sn = _make_sn_raw(
+            [
+                {"Date": "2026-06-01"},
+                {"Date": "2025-01-01"},
+                {"Date": "2025-01-02"},
+            ]
+        )
         result = run(rep, sn)
         s = result["summary"].set_index("metric")["value"]
         assert int(s["total_servicenow_rows_excluded_by_date"]) == 2
@@ -249,7 +285,7 @@ class TestSummaryAccuracy:
 
     def test_total_replicon_rows_loaded_matches_input(self):
         rep = _make_replicon_raw([{}, {}])  # 2 rows
-        sn  = _make_sn_raw([{}])
+        sn = _make_sn_raw([{}])
         result = run(rep, sn)
         s = result["summary"].set_index("metric")["value"]
         assert int(s["total_replicon_rows_loaded"]) == 2
@@ -257,7 +293,7 @@ class TestSummaryAccuracy:
     def test_net_variance_direction(self):
         # SN has MORE hours than Replicon → positive net variance
         rep = _make_replicon_raw([{"Hours": "4"}])
-        sn  = _make_sn_raw([{"Time worked": 8}])
+        sn = _make_sn_raw([{"Time worked": 8}])
         result = run(rep, sn)
         s = result["summary"].set_index("metric")["value"]
         assert float(s["net_variance"]) > 0
@@ -266,10 +302,12 @@ class TestSummaryAccuracy:
         # Replicon has task T1; SN has one row for T1 (in window + matched user) and one for T-ONLY-SN
         # The T-ONLY-SN row should be excluded by the task filter
         rep = _make_replicon_raw([{"Task Code": "T1"}])
-        sn  = _make_sn_raw([
-            {"Project ID": "T1"},         # matches Replicon task
-            {"Project ID": "SN-ONLY-TASK"},  # SN-only task, excluded by task filter
-        ])
+        sn = _make_sn_raw(
+            [
+                {"Project ID": "T1"},  # matches Replicon task
+                {"Project ID": "SN-ONLY-TASK"},  # SN-only task, excluded by task filter
+            ]
+        )
         result = run(rep, sn)
         s = result["summary"].set_index("metric")["value"]
         assert int(s["total_servicenow_rows_excluded_by_task"]) >= 1
@@ -278,7 +316,7 @@ class TestSummaryAccuracy:
         # When SN has a row for a user that IS matched, hours_replicon must be 0 (not NaN)
         # if there is no corresponding Replicon entry. This tests the fillna(0) path.
         rep = _make_replicon_raw([{"Task Code": "T1", "Hours": "8"}])
-        sn  = _make_sn_raw([{"Project ID": "T1", "Time worked": 5}])
+        sn = _make_sn_raw([{"Project ID": "T1", "Time worked": 5}])
         result = run(rep, sn)
         # No row should have NaN in hours_replicon or hours_servicenow
         assert result["recon_table"]["hours_replicon"].isna().sum() == 0
@@ -288,7 +326,7 @@ class TestSummaryAccuracy:
         # SN rows without a matched user should have match_status='user_mapping_required'
         # This tests the fillna('user_mapping_required') path on match_status.
         rep = _make_replicon_raw([{"User Name": "Alice Z"}])  # won't match SN user
-        sn  = _make_sn_raw([{"User": "Bob Nobody XYZ", "User ID": "bnobody123"}])
+        sn = _make_sn_raw([{"User": "Bob Nobody XYZ", "User ID": "bnobody123"}])
         result = run(rep, sn)
         # Any SN-side rows that are in the outer join but unmatched should have the fill status
         mt = result["recon_table"]

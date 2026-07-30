@@ -2,12 +2,12 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
 
 def prepare_fte_data(
     df: pd.DataFrame,
@@ -24,7 +24,9 @@ def prepare_fte_data(
             [
                 wk.groupby("week_start")["Time worked"].sum().rename("total_hours"),
                 wk[~wk["is_gen"] & wk["Category"].isin(task_categories)]
-                .groupby("week_start")["Time worked"].sum().rename("task_hours"),
+                .groupby("week_start")["Time worked"]
+                .sum()
+                .rename("task_hours"),
                 wk[wk["is_gen"]].groupby("week_start")["Time worked"].sum().rename("gen_hours"),
             ],
             axis=1,
@@ -35,8 +37,10 @@ def prepare_fte_data(
             task_fte=lambda d: (d["task_hours"] / hours_per_fte).round(2),
             gen_fte=lambda d: (d["gen_hours"] / hours_per_fte).round(2),
             gen_pct=lambda d: (
-                d["gen_hours"] / d["total_hours"].replace(0, float("nan")) * 100
-            ).round(1).fillna(0),
+                (d["gen_hours"] / d["total_hours"].replace(0, float("nan")) * 100)
+                .round(1)
+                .fillna(0)
+            ),
             in_band=lambda d: (d["total_hours"] / hours_per_fte).between(*fte_band),
             month=lambda d: d.index.to_period("M").astype(str),
             total_hours=lambda d: d["total_hours"].round(2),
@@ -67,12 +71,29 @@ def prepare_fte_data(
     )
 
     graph1 = w[
-        ["week_start", "week_end", "week", "month", "total_hours", "total_fte", "in_band"]
+        [
+            "week_start",
+            "week_end",
+            "week",
+            "month",
+            "total_hours",
+            "total_fte",
+            "in_band",
+        ]
     ].assign(fte_lower=fte_band[0], fte_upper=fte_band[1])
 
     graph2 = w[
-        ["week_start", "week_end", "week", "month", "task_hours", "task_fte",
-         "gen_hours", "gen_fte", "gen_pct"]
+        [
+            "week_start",
+            "week_end",
+            "week",
+            "month",
+            "task_hours",
+            "task_fte",
+            "gen_hours",
+            "gen_fte",
+            "gen_pct",
+        ]
     ]
 
     df_pivot = df.dropna(subset=["week_start", "Category"]).copy()
@@ -81,20 +102,16 @@ def prepare_fte_data(
         df_pivot["Category"] + " (GEN)",
         df_pivot["Category"],
     )
-    pivot = (
-        df_pivot.pivot_table(
-            index="Category",
-            columns="week_start",
-            values="Time worked",
-            aggfunc="sum",
-            margins=True,
-            margins_name="Grand Total",
-        )
-        .round(2)
-    )
+    pivot = df_pivot.pivot_table(
+        index="Category",
+        columns="week_start",
+        values="Time worked",
+        aggfunc="sum",
+        margins=True,
+        margins_name="Grand Total",
+    ).round(2)
     pivot.columns = [
-        c.strftime("%-d/%-m/%Y") if isinstance(c, pd.Timestamp) else c
-        for c in pivot.columns
+        c.strftime("%-d/%-m/%Y") if isinstance(c, pd.Timestamp) else c for c in pivot.columns
     ]
 
     week_labels = weekly[["week_start", "week_end", "week", "month"]].copy()
@@ -119,8 +136,12 @@ def prepare_fte_data(
         ],
         ignore_index=True,
     )
-    tech_weekly_no_gen = _build_tech_weekly(df_tech_no_gen, week_labels, hours_per_fte, by_spec=False)
-    tech_weekly_spec_no_gen = _build_tech_weekly(df_tech_no_gen, week_labels, hours_per_fte, by_spec=True)
+    tech_weekly_no_gen = _build_tech_weekly(
+        df_tech_no_gen, week_labels, hours_per_fte, by_spec=False
+    )
+    tech_weekly_spec_no_gen = _build_tech_weekly(
+        df_tech_no_gen, week_labels, hours_per_fte, by_spec=True
+    )
 
     return {
         "weekly": weekly,
@@ -132,6 +153,7 @@ def prepare_fte_data(
         "tech_weekly_no_gen": tech_weekly_no_gen,
         "tech_weekly_spec_no_gen": tech_weekly_spec_no_gen,
     }
+
 
 def _build_tech_weekly(
     source: pd.DataFrame,
@@ -158,10 +180,11 @@ def _build_tech_weekly(
     )
     return out[col_order].sort_values(group_cols).reset_index(drop=True)
 
+
 def validate_against_reference(
     weekly: pd.DataFrame,
-    ref_graph2_path: Optional[Path],
-    ref_graph1_path: Optional[Path],
+    ref_graph2_path: Path | None,
+    ref_graph1_path: Path | None,
 ) -> None:
     """Compare computed FTE figures against reference CSVs. Logs a warning if any week differs by >0.1%."""
     for ref_path, our_hours_col, our_fte_col, label in [
@@ -180,7 +203,12 @@ def validate_against_reference(
         close = (m["Δ_pct"] <= 1.0).sum()
         logger.info(
             "%s: %d weeks | exact=%d  close=%d  avg diff=%.1f h  max diff=%.1f h",
-            label, len(m), exact, close, m["Δ_hours"].mean(), m["Δ_hours"].abs().max(),
+            label,
+            len(m),
+            exact,
+            close,
+            m["Δ_hours"].mean(),
+            m["Δ_hours"].abs().max(),
         )
         diffs = m[m["Δ_pct"] > 0.1]
         if len(diffs):
@@ -188,6 +216,9 @@ def validate_against_reference(
             for _, row in diffs.iterrows():
                 logger.warning(
                     "  %s  our=%.2f h  ref=%.2f h  diff=%.2f h (%.1f%%)",
-                    row["week_start"].date(), row[our_hours_col], row["ref_hours"],
-                    row["Δ_hours"], row["Δ_pct"],
+                    row["week_start"].date(),
+                    row[our_hours_col],
+                    row["ref_hours"],
+                    row["Δ_hours"],
+                    row["Δ_pct"],
                 )

@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from pytest_bdd import given, when, then, parsers, scenarios
+from pytest_bdd import given, parsers, scenarios, then, when
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from tests.conftest import make_replicon, make_sn
 from src.reconciliation import run
+from tests.conftest import make_replicon, make_sn
 
 scenarios("../features/reconciliation.feature")
 
@@ -19,10 +19,11 @@ scenarios("../features/reconciliation.feature")
 # Context helpers
 # ---------------------------------------------------------------------------
 
+
 class Ctx:
     rep: pd.DataFrame = None
-    sn: pd.DataFrame  = None
-    result: dict      = None
+    sn: pd.DataFrame = None
+    result: dict = None
 
 
 @pytest.fixture
@@ -33,6 +34,7 @@ def ctx():
 # ---------------------------------------------------------------------------
 # Given
 # ---------------------------------------------------------------------------
+
 
 @given("a Replicon entry with 8 hours on task TASK-001 for user jsmith")
 def replicon_8h(ctx):
@@ -54,7 +56,9 @@ def replicon_empty_task(ctx):
 @given("a ServiceNow entry with 5 hours on task TASK-001 for user jsmith")
 def sn_5h_task(ctx):
     # Same date as Replicon so it falls within the date window
-    ctx.sn = make_sn({"Time worked": 5, "Project ID": "TASK-001", "User ID": "jsmith", "Date": "2026-06-01"})
+    ctx.sn = make_sn(
+        {"Time worked": 5, "Project ID": "TASK-001", "User ID": "jsmith", "Date": "2026-06-01"}
+    )
 
 
 @given("a Replicon entry with 8 hours on task TASK-001 for user jsmith", target_fixture="ctx")
@@ -101,6 +105,7 @@ def sn_old_date(ctx):
 # When
 # ---------------------------------------------------------------------------
 
+
 @when("I run reconciliation")
 def run_recon(ctx):
     if ctx.rep is None:
@@ -113,6 +118,7 @@ def run_recon(ctx):
 # ---------------------------------------------------------------------------
 # Then
 # ---------------------------------------------------------------------------
+
 
 @then("the net variance is 0")
 def net_variance_zero(ctx):
@@ -137,7 +143,7 @@ def check_variance(ctx, value):
 @then("Replicon hours before aggregation equals hours after aggregation")
 def replicon_tieout(ctx):
     before = ctx.result["replicon"]["hours"].sum()
-    after  = ctx.result["replicon_agg"]["hours_replicon"].sum()
+    after = ctx.result["replicon_agg"]["hours_replicon"].sum()
     assert abs(before - after) < 0.01
 
 

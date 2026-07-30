@@ -1,10 +1,11 @@
-"""Logging setup, timing utilities, and file-rotation helpers."""
+"""Logging setup, timing, and file-rotation helpers."""
 
 import logging
+import shutil
 import sys
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,15 @@ def setup_logging(log_dir: Path | None = None, level: int = logging.INFO) -> log
     root.addHandler(ch)
 
     if log_dir is not None:
-        from logging.handlers import RotatingFileHandler
         from datetime import datetime
+        from logging.handlers import RotatingFileHandler
+
         log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+        log_file = log_dir / f"pipeline_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}.log"
+        fh = RotatingFileHandler(
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        )
         fh.setFormatter(formatter)
         root.addHandler(fh)
         root.info("Log file: %s", log_file)
@@ -61,7 +65,7 @@ def rotate_to_history(path: Path, timestamp: str | None = None) -> None:
     path = Path(path)
     if not path.exists():
         return
-    ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     history_dir = path.parent / "history"
     history_dir.mkdir(parents=True, exist_ok=True)
     dest = history_dir / f"{path.stem}_{ts}{path.suffix}"
@@ -69,9 +73,9 @@ def rotate_to_history(path: Path, timestamp: str | None = None) -> None:
     logger.info("Archived to history: %s → history/%s", path.name, dest.name)
 
 
-def publish_to_sharepoint(local_path: Path,
-                           sharepoint_dir: "Path | None",
-                           timestamp: str | None = None) -> "Path | None":
+def publish_to_sharepoint(
+    local_path: Path, sharepoint_dir: "Path | None", timestamp: str | None = None
+) -> "Path | None":
     """Copy *local_path* to *sharepoint_dir*, archiving any existing file first.
 
     Applies the same history-rotation logic as :func:`rotate_to_history` so
@@ -81,24 +85,21 @@ def publish_to_sharepoint(local_path: Path,
     Returns the destination path on success, or ``None`` if *sharepoint_dir*
     is not configured or not accessible (logged as a warning, never raises).
     """
-    import shutil
 
     if not sharepoint_dir:
         return None
     sharepoint_dir = Path(sharepoint_dir)
     if not sharepoint_dir.exists():
-        logger.warning(
-            "SharePoint dir not accessible — skipping publish: %s", sharepoint_dir
-        )
+        logger.warning("SharePoint dir not accessible — skipping publish: %s", sharepoint_dir)
         return None
 
     dest = sharepoint_dir / Path(local_path).name
-    rotate_to_history(dest, timestamp)          # archive old copy first
+    rotate_to_history(dest, timestamp)  # archive old copy first
 
     try:
         shutil.copy2(local_path, dest)
-        logger.info("Published to SharePoint: %s", dest)
+        logger.info("published to sharepoint: %s", dest)
         return dest
-    except Exception as exc:
-        logger.warning("SharePoint publish failed (%s): %s", exc, dest)
+    except OSError as exc:
+        logger.warning("sharepoint publish failed — %s: %s", type(exc).__name__, dest)
         return None

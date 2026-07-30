@@ -1,15 +1,15 @@
 """Reconciliation engine. Compares Replicon and ServiceNow at date x user x task_code grain."""
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from src.mappings import _user_tables, _resolve_mapping
+from src.mappings import _resolve_mapping, _user_tables
 from src.transformations import clean_replicon, clean_servicenow
 
 logger = logging.getLogger(__name__)
+
 
 def classify_exception(row: pd.Series) -> tuple:
     """Return (exception_type, possible_cause) for one reconciliation row, or (None, None)."""
@@ -25,10 +25,11 @@ def classify_exception(row: pd.Series) -> tuple:
         return "hours_mismatch", "Hours differ between systems"
     return None, None
 
+
 def run(
     replicon_raw: pd.DataFrame,
     sn_raw: pd.DataFrame,
-    approved_mapping: Optional[pd.DataFrame] = None,
+    approved_mapping: pd.DataFrame | None = None,
     auto_accept: float = 0.80,
     review_low: float = 0.70,
 ) -> dict:
@@ -56,14 +57,17 @@ def run(
     replicon_min_date = replicon["date"].min()
     replicon_max_date = replicon["date"].max()
 
-    sn_in_window = sn[
-        (sn["date"] >= replicon_min_date) & (sn["date"] <= replicon_max_date)
-    ].copy()
+    sn_in_window = sn[(sn["date"] >= replicon_min_date) & (sn["date"] <= replicon_max_date)].copy()
     sn_excluded_date = len(sn) - len(sn_in_window)
 
-    _accepted = user_mapping[
-        user_mapping["match_status"].isin(["auto_accepted", "manual_match"])
-    ][["replicon_username", "servicenow_user_id", "replicon_employee_id", "review_required"]]
+    _accepted = user_mapping[user_mapping["match_status"].isin(["auto_accepted", "manual_match"])][
+        [
+            "replicon_username",
+            "servicenow_user_id",
+            "replicon_employee_id",
+            "review_required",
+        ]
+    ]
 
     _replicon_sn_ids = set(_accepted["servicenow_user_id"].dropna())
     sn_in_window = sn_in_window[sn_in_window["sn_user_id"].isin(_replicon_sn_ids)]
@@ -87,17 +91,13 @@ def run(
         how="left",
     )
     replicon_agg = (
-        replicon_mapped.groupby(
-            ["date", "servicenow_user_id", "task_code"], dropna=False
-        )["hours"]
+        replicon_mapped.groupby(["date", "servicenow_user_id", "task_code"], dropna=False)["hours"]
         .sum()
         .reset_index()
         .rename(columns={"hours": "hours_replicon"})
     )
     sn_agg = (
-        sn_in_window.groupby(
-            ["date", "sn_user_id", "task_code"], dropna=False
-        )["hours"]
+        sn_in_window.groupby(["date", "sn_user_id", "task_code"], dropna=False)["hours"]
         .sum()
         .reset_index()
         .rename(columns={"sn_user_id": "servicenow_user_id", "hours": "hours_servicenow"})
@@ -109,9 +109,7 @@ def run(
     replicon_agg["servicenow_user_id"] = replicon_agg["servicenow_user_id"].astype(object)
     sn_agg["servicenow_user_id"] = sn_agg["servicenow_user_id"].astype(object)
 
-    recon = replicon_agg.merge(
-        sn_agg, on=["date", "servicenow_user_id", "task_code"], how="outer"
-    )
+    recon = replicon_agg.merge(sn_agg, on=["date", "servicenow_user_id", "task_code"], how="outer")
     if len(recon) > len(replicon_agg) + len(sn_agg):
         raise RuntimeError(
             f"MERGE CARDINALITY ERROR: {len(recon):,} rows from "
@@ -126,7 +124,12 @@ def run(
     _uid_info = (
         user_mapping[["servicenow_user_id", "replicon_username", "replicon_employee_id"]]
         .drop_duplicates(subset=["servicenow_user_id"])
-        .rename(columns={"replicon_username": "username", "replicon_employee_id": "employee_id"})
+        .rename(
+            columns={
+                "replicon_username": "username",
+                "replicon_employee_id": "employee_id",
+            }
+        )
     )
     recon = recon.merge(_uid_info, on="servicenow_user_id", how="left")
 
@@ -140,9 +143,16 @@ def run(
     recon_table = (
         recon[
             [
-                "date", "servicenow_user_id", "username", "employee_id",
-                "task_code", "hours_replicon", "hours_servicenow", "variance",
-                "match_status", "review_required",
+                "date",
+                "servicenow_user_id",
+                "username",
+                "employee_id",
+                "task_code",
+                "hours_replicon",
+                "hours_servicenow",
+                "variance",
+                "match_status",
+                "review_required",
             ]
         ]
         .rename(columns={"servicenow_user_id": "user_id"})
@@ -200,9 +210,17 @@ def run(
     )
     exception_report = _exc[
         [
-            "date", "user_id", "username", "employee_id", "task_code",
-            "hours_replicon", "hours_servicenow", "variance",
-            "percentage_difference", "exception_type", "possible_cause",
+            "date",
+            "user_id",
+            "username",
+            "employee_id",
+            "task_code",
+            "hours_replicon",
+            "hours_servicenow",
+            "variance",
+            "percentage_difference",
+            "exception_type",
+            "possible_cause",
         ]
     ].reset_index(drop=True)
 
@@ -229,10 +247,7 @@ def run(
         "net_variance": round(recon_table["variance"].sum(), 2),
     }
     summary_df = (
-        pd.Series(summary_data)
-        .rename("value")
-        .reset_index()
-        .rename(columns={"index": "metric"})
+        pd.Series(summary_data).rename("value").reset_index().rename(columns={"index": "metric"})
     )
 
     logger.info(

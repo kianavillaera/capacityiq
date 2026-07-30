@@ -7,8 +7,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-REPLICON_REQUIRED_COLS     = {"Entry Date", "User Name", "Task Code"}
-SERVICENOW_REQUIRED_COLS   = {"Date", "User", "User ID", "Project ID", "Time worked"}
+REPLICON_REQUIRED_COLS = {"Entry Date", "User Name", "Task Code"}
+SERVICENOW_REQUIRED_COLS = {"Date", "User", "User ID", "Project ID", "Time worked"}
 USER_MAPPING_REQUIRED_COLS = {"replicon_username", "servicenow_user_id", "match_status"}
 
 
@@ -56,7 +56,12 @@ def validate_replicon_dates(df: pd.DataFrame) -> None:
 def validate_no_duplicate_keys(df: pd.DataFrame, key_cols: list[str], name: str) -> None:
     dupes = df.duplicated(subset=key_cols).sum()
     if dupes:
-        logger.warning("%d duplicate rows in '%s' on %s. Hours will be summed.", dupes, name, key_cols)
+        logger.warning(
+            "%d duplicate rows in '%s' on %s. Hours will be summed.",
+            dupes,
+            name,
+            key_cols,
+        )
 
 
 def _check_columns(df: pd.DataFrame, required: set, source_name: str) -> None:

@@ -5,21 +5,20 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from pytest_bdd import given, when, then, scenarios
+from pytest_bdd import given, scenarios, then, when
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.mappings import normalise_name, normalise_uid, build_user_mapping, match_users
-from src.transformations import clean_replicon, clean_servicenow
+from src.mappings import build_user_mapping, normalise_name, normalise_uid
 
 scenarios("../features/user_matching.feature")
 
 
 class Ctx:
-    rep_users: pd.DataFrame  = None
-    sn_users: pd.DataFrame   = None
-    mapping: pd.DataFrame    = None
-    approved: pd.DataFrame   = None
+    rep_users: pd.DataFrame = None
+    sn_users: pd.DataFrame = None
+    mapping: pd.DataFrame = None
+    approved: pd.DataFrame = None
 
 
 @pytest.fixture
@@ -28,20 +27,24 @@ def ctx():
 
 
 def _rep_users(name: str) -> pd.DataFrame:
-    return pd.DataFrame({
-        "username":    [name],
-        "employee_id": ["E001"],
-        "norm_name":   [normalise_name(name)],
-    })
+    return pd.DataFrame(
+        {
+            "username": [name],
+            "employee_id": ["E001"],
+            "norm_name": [normalise_name(name)],
+        }
+    )
 
 
 def _sn_users(name: str, uid: str) -> pd.DataFrame:
-    return pd.DataFrame({
-        "sn_user":   [name],
-        "sn_user_id":[uid],
-        "norm_name": [normalise_name(name)],
-        "norm_uid":  [normalise_uid(uid)],
-    })
+    return pd.DataFrame(
+        {
+            "sn_user": [name],
+            "sn_user_id": [uid],
+            "norm_name": [normalise_name(name)],
+            "norm_uid": [normalise_uid(uid)],
+        }
+    )
 
 
 @given('a Replicon user named "John Smith"')
@@ -72,14 +75,16 @@ def sn_empty(ctx):
 @given("an approved user mapping with a manual correction")
 def approved_mapping(ctx):
     ctx.rep_users = _rep_users("Some User")
-    ctx.sn_users  = _sn_users("Some User", "suser")
-    ctx.approved  = pd.DataFrame({
-        "replicon_username":    ["Some User"],
-        "servicenow_user_id":   ["manual_override"],
-        "match_status":         ["auto_accepted"],
-        "replicon_employee_id": ["E999"],
-        "review_required":      [False],
-    })
+    ctx.sn_users = _sn_users("Some User", "suser")
+    ctx.approved = pd.DataFrame(
+        {
+            "replicon_username": ["Some User"],
+            "servicenow_user_id": ["manual_override"],
+            "match_status": ["auto_accepted"],
+            "replicon_employee_id": ["E999"],
+            "review_required": [False],
+        }
+    )
 
 
 @when("I match users")
@@ -90,6 +95,7 @@ def do_match(ctx):
 @when("I run user matching with the approved mapping")
 def do_match_with_approved(ctx):
     from src.mappings import _resolve_mapping
+
     ctx.mapping, _ = _resolve_mapping(ctx.rep_users, ctx.sn_users, ctx.approved, 0.80, 0.70)
 
 

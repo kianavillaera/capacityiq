@@ -2,27 +2,20 @@
 Tests for validation functions.
 """
 
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from src.validators import (
     ValidationError,
+    validate_no_duplicate_keys,
     validate_not_empty,
     validate_replicon_columns,
-    validate_servicenow_columns,
     validate_replicon_dates,
-    validate_no_duplicate_keys,
+    validate_servicenow_columns,
 )
 
-
 # ── validate_not_empty ────────────────────────────────────────────────────────
+
 
 class TestValidateNotEmpty:
     def test_passes_for_non_empty(self):
@@ -36,13 +29,16 @@ class TestValidateNotEmpty:
 
 # ── validate_replicon_columns ─────────────────────────────────────────────────
 
+
 class TestValidateRepliconColumns:
     def _make_valid(self) -> pd.DataFrame:
-        return pd.DataFrame({
-            "Entry Date": ["01.06.2026"],
-            "User Name": ["John"],
-            "Task Code": ["T001"],
-        })
+        return pd.DataFrame(
+            {
+                "Entry Date": ["01.06.2026"],
+                "User Name": ["John"],
+                "Task Code": ["T001"],
+            }
+        )
 
     def test_passes_with_required_columns(self):
         validate_replicon_columns(self._make_valid())
@@ -55,15 +51,18 @@ class TestValidateRepliconColumns:
 
 # ── validate_servicenow_columns ───────────────────────────────────────────────
 
+
 class TestValidateServiceNowColumns:
     def _make_valid(self) -> pd.DataFrame:
-        return pd.DataFrame({
-            "Date": ["01/06/2026"],
-            "User": ["John"],
-            "User ID": ["jsmith"],
-            "Project ID": ["T001"],
-            "Time worked": [8],
-        })
+        return pd.DataFrame(
+            {
+                "Date": ["01/06/2026"],
+                "User": ["John"],
+                "User ID": ["jsmith"],
+                "Project ID": ["T001"],
+                "Time worked": [8],
+            }
+        )
 
     def test_passes_with_required_columns(self):
         validate_servicenow_columns(self._make_valid())
@@ -76,9 +75,11 @@ class TestValidateServiceNowColumns:
 
 # ── validate_replicon_dates ───────────────────────────────────────────────────
 
+
 class TestValidateRepliconDates:
     def test_no_warning_for_valid_dates(self, caplog):
         import logging
+
         df = pd.DataFrame({"date": pd.to_datetime(["2026-06-01", "2026-06-02"])})
         with caplog.at_level(logging.WARNING):
             validate_replicon_dates(df)
@@ -86,6 +87,7 @@ class TestValidateRepliconDates:
 
     def test_warns_for_invalid_dates(self, caplog):
         import logging
+
         df = pd.DataFrame({"date": [pd.NaT, pd.Timestamp("2026-06-01")]})
         with caplog.at_level(logging.WARNING):
             validate_replicon_dates(df)
@@ -94,9 +96,11 @@ class TestValidateRepliconDates:
 
 # ── validate_no_duplicate_keys ────────────────────────────────────────────────
 
+
 class TestValidateNoDuplicateKeys:
     def test_no_warning_for_unique_keys(self, caplog):
         import logging
+
         df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         with caplog.at_level(logging.WARNING):
             validate_no_duplicate_keys(df, ["a"], "test")
@@ -104,6 +108,7 @@ class TestValidateNoDuplicateKeys:
 
     def test_warns_for_duplicate_keys(self, caplog):
         import logging
+
         df = pd.DataFrame({"a": [1, 1], "b": [3, 4]})
         with caplog.at_level(logging.WARNING):
             validate_no_duplicate_keys(df, ["a"], "test")
@@ -123,22 +128,27 @@ class TestValidationErrorMessages:
 
     def test_empty_error_includes_dataset_name(self):
         from src.validators import validate_not_empty
+
         with pytest.raises(ValidationError, match="Replicon"):
             validate_not_empty(pd.DataFrame(), "Replicon")
 
     def test_missing_file_error_includes_path(self):
-        from src.validators import validate_files_exist
         from pathlib import Path
+
+        from src.validators import validate_files_exist
+
         with pytest.raises(ValidationError, match="/nonexistent/path.xlsx"):
             validate_files_exist([Path("/nonexistent/path.xlsx")])
 
     def test_empty_directory_error_includes_path(self, tmp_path):
         from src.validators import validate_directory_not_empty
+
         with pytest.raises(ValidationError, match=str(tmp_path)):
             validate_directory_not_empty(tmp_path)
 
     def test_user_mapping_missing_columns_raises(self):
         from src.validators import validate_user_mapping_columns
+
         df = pd.DataFrame({"replicon_username": ["u"]})
         with pytest.raises(ValidationError):
             validate_user_mapping_columns(df)

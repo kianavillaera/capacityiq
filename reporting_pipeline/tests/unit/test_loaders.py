@@ -3,22 +3,14 @@ Tests for data loaders.
 """
 
 import io
-import sys
-from pathlib import Path
 
 import pandas as pd
 import pytest
-
-# Ensure reporting_pipeline/ is importable
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.loaders import (
     load_replicon_bytes,
     load_timecard_bytes,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +32,7 @@ def _make_excel_bytes(df: pd.DataFrame) -> bytes:
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
+
 
 class TestLoadRepliconBytes:
     def test_returns_dataframe(self):
@@ -67,13 +60,15 @@ class TestLoadRepliconBytes:
 
 class TestLoadTimecardBytes:
     def _make_sn_excel(self) -> bytes:
-        df = pd.DataFrame({
-            "Date": ["01/06/2026"],
-            "User": ["John Smith"],
-            "User ID": ["jsmith"],
-            "Project ID": ["TASK-001"],
-            "Time worked": [8],
-        })
+        df = pd.DataFrame(
+            {
+                "Date": ["01/06/2026"],
+                "User": ["John Smith"],
+                "User ID": ["jsmith"],
+                "Project ID": ["TASK-001"],
+                "Time worked": [8],
+            }
+        )
         return _make_excel_bytes(df)
 
     def test_returns_dataframe(self):
@@ -92,6 +87,7 @@ class TestLoadTimecardBytes:
 class TestLoadTimecardFiles:
     def test_raises_for_empty_paths(self):
         from src.loaders import load_timecard_files
+
         with pytest.raises(ValueError, match="required"):
             load_timecard_files([])
 
@@ -99,17 +95,19 @@ class TestLoadTimecardFiles:
 class TestLoadRepliconDir:
     def test_raises_for_empty_directory(self, tmp_path):
         from src.loaders import load_replicon_dir
+
         with pytest.raises(ValueError, match="No CSV or XLSX"):
             load_replicon_dir(tmp_path)
 
     def test_raises_for_missing_directory(self, tmp_path):
         from src.loaders import load_replicon_dir
+
         with pytest.raises((ValueError, FileNotFoundError, OSError)):
             load_replicon_dir(tmp_path / "nonexistent")
 
     def test_loads_csv_from_directory(self, tmp_path):
-        import csv
         from src.loaders import load_replicon_dir
+
         csvfile = tmp_path / "rep.csv"
         csvfile.write_text(
             "Entry Date,User Name,Employee ID,Project Code,Task Code,Hours\n"
@@ -121,6 +119,7 @@ class TestLoadRepliconDir:
 
     def test_ffills_user_name_in_merged_cell_format(self, tmp_path):
         from src.loaders import load_replicon_dir
+
         csvfile = tmp_path / "rep.csv"
         csvfile.write_text(
             "Entry Date,User Name,Employee ID,Project Code,Task Code,Hours\n"
@@ -134,5 +133,6 @@ class TestLoadRepliconDir:
 class TestLoadApprovedMapping:
     def test_returns_none_when_file_missing(self, tmp_path):
         from src.loaders import load_approved_mapping
+
         result = load_approved_mapping(tmp_path / "nonexistent.xlsx")
         assert result is None

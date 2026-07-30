@@ -18,21 +18,43 @@ def clean_replicon(df: pd.DataFrame) -> pd.DataFrame:
         df["_source_file"] = "unknown"
 
     df = df.dropna(subset=["Entry Date", "User Name"]).copy()
-    df = df.rename(columns={
-        "Entry Date": "date", "User Name": "username", "Employee ID": "employee_id",
-        "Project Code": "project_code", "Task Code": "task_code", "Hours": "hours",
-    })
+    df = df.rename(
+        columns={
+            "Entry Date": "date",
+            "User Name": "username",
+            "Employee ID": "employee_id",
+            "Project Code": "project_code",
+            "Task Code": "task_code",
+            "Hours": "hours",
+        }
+    )
     df["date"] = pd.to_datetime(df["date"], format="%d.%m.%Y", errors="coerce")
     # Blank hours = submitted entry with no hours logged.
     df["hours"] = pd.to_numeric(df["hours"], errors="coerce").fillna(0.0)
     df["employee_id"] = (
-        df["employee_id"].astype(str)
+        df["employee_id"]
+        .astype(str)
         .str.replace(r"\.0$", "", regex=True)
         .str.strip()
         .replace("nan", None)
     )
-    logger.info("Replicon cleaned: %d rows, %d users, %.1f h", len(df), df["username"].nunique(), df["hours"].sum())
-    return df[["date", "username", "employee_id", "project_code", "task_code", "hours", "_source_file"]]
+    logger.info(
+        "Replicon cleaned: %d rows, %d users, %.1f h",
+        len(df),
+        df["username"].nunique(),
+        df["hours"].sum(),
+    )
+    return df[
+        [
+            "date",
+            "username",
+            "employee_id",
+            "project_code",
+            "task_code",
+            "hours",
+            "_source_file",
+        ]
+    ]
 
 
 def clean_servicenow(df: pd.DataFrame) -> pd.DataFrame:
@@ -40,20 +62,32 @@ def clean_servicenow(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df["_sheet"] = "unknown"
 
-    df = df.rename(columns={
-        "Date": "date", "User": "sn_user", "User ID": "sn_user_id",
-        "Project ID": "task_code", "Time worked": "hours",
-    })
+    df = df.rename(
+        columns={
+            "Date": "date",
+            "User": "sn_user",
+            "User ID": "sn_user_id",
+            "Project ID": "task_code",
+            "Time worked": "hours",
+        }
+    )
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["hours"] = pd.to_numeric(df["hours"], errors="coerce").fillna(0.0)
     df["sn_user_id"] = df["sn_user_id"].astype(str).str.strip()
     df["sn_user"] = df["sn_user"].astype(str).str.strip()
     df["task_code"] = df["task_code"].astype(str).str.strip()
-    logger.info("SN cleaned: %d rows, %d users, %.1f h", len(df), df["sn_user_id"].nunique(), df["hours"].sum())
+    logger.info(
+        "SN cleaned: %d rows, %d users, %.1f h",
+        len(df),
+        df["sn_user_id"].nunique(),
+        df["hours"].sum(),
+    )
     return df[["date", "sn_user", "sn_user_id", "task_code", "hours", "_sheet"]]
 
 
-def clean_timecard_for_attendance(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def clean_timecard_for_attendance(
+    df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split into (regular, on-call). On-call = 'On-Call' in Rate type."""
     from src.mappings import normalise_name
 

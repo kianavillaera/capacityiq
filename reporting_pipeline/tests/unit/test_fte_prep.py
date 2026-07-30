@@ -4,35 +4,33 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.fte_prep import prepare_fte_data
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-TECH_MAP  = {"Tech A": "Group A", "Tech B": "Group B"}
+TECH_MAP = {"Tech A": "Group A", "Tech B": "Group B"}
 TASK_CATS = ["Task work", "Sick/Holiday"]
 
 
 def _make_timecard(rows: list[dict]) -> pd.DataFrame:
     week = pd.Timestamp("2026-06-02")  # Monday
     defaults = {
-        "Date":           week,
-        "week_start":     week,
-        "User ID":        "u1",
-        "User":           "User One",
-        "Time worked":    8.0,
-        "Category":       "Task work",
-        "Task":           "T001",
-        "Rate type":      "Standard",
-        "Technology":     "Tech A",
+        "Date": week,
+        "week_start": week,
+        "User ID": "u1",
+        "User": "User One",
+        "Time worked": 8.0,
+        "Category": "Task work",
+        "Task": "T001",
+        "Rate type": "Standard",
+        "Technology": "Tech A",
         "Specialisation": "Spec A",
-        "is_gen":         False,
+        "is_gen": False,
     }
     records = [{**defaults, **r} for r in rows]
     df = pd.DataFrame(records)
@@ -44,6 +42,7 @@ def _make_timecard(rows: list[dict]) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestPrepareFteData:
     def test_returns_required_keys(self):
@@ -59,21 +58,25 @@ class TestPrepareFteData:
         assert abs(row["total_fte"] - 1.0) < 0.01
 
     def test_task_fte_excludes_gen(self):
-        df = _make_timecard([
-            {"Time worked": 20.0, "Task": "TASK1",  "is_gen": False, "Category": "Task work"},
-            {"Time worked": 14.0, "Task": "GENBENCH","is_gen": True,  "Category": "Task work"},
-        ])
+        df = _make_timecard(
+            [
+                {"Time worked": 20.0, "Task": "TASK1", "is_gen": False, "Category": "Task work"},
+                {"Time worked": 14.0, "Task": "GENBENCH", "is_gen": True, "Category": "Task work"},
+            ]
+        )
         result = prepare_fte_data(df, 34.0, (100, 119), TECH_MAP, TASK_CATS)
         row = result["weekly"].iloc[0]
         # task_fte covers Task work (non-GEN) + Sick/Holiday; gen_fte covers GEN
         assert abs(row["task_hours"] - 20.0) < 0.01
-        assert abs(row["gen_hours"]  - 14.0) < 0.01
+        assert abs(row["gen_hours"] - 14.0) < 0.01
 
     def test_gen_pct_calculation(self):
-        df = _make_timecard([
-            {"Time worked": 17.0, "Task": "T1",       "is_gen": False, "Category": "Task work"},
-            {"Time worked": 17.0, "Task": "GENOVERH", "is_gen": True,  "Category": "Task work"},
-        ])
+        df = _make_timecard(
+            [
+                {"Time worked": 17.0, "Task": "T1", "is_gen": False, "Category": "Task work"},
+                {"Time worked": 17.0, "Task": "GENOVERH", "is_gen": True, "Category": "Task work"},
+            ]
+        )
         result = prepare_fte_data(df, 34.0, (100, 119), TECH_MAP, TASK_CATS)
         pct = result["weekly"].iloc[0]["gen_pct"]
         assert abs(pct - 50.0) < 0.5
@@ -104,15 +107,19 @@ class TestPrepareFteData:
         assert "Group A" in groups
 
     def test_unknown_technology_mapped_to_other(self):
-        df = _make_timecard([{"Technology": "Unknown Tech XYZ", "Category": "Task work", "is_gen": False}])
+        df = _make_timecard(
+            [{"Technology": "Unknown Tech XYZ", "Category": "Task work", "is_gen": False}]
+        )
         result = prepare_fte_data(df, 34.0, (100, 119), TECH_MAP, TASK_CATS)
         groups = result["tech_weekly"]["tech_group"].unique()
         assert "Other" in groups
 
     def test_hours_do_not_change_in_weekly_aggregation(self):
-        df = _make_timecard([
-            {"Time worked": 5.5},
-            {"Time worked": 3.5},
-        ])
+        df = _make_timecard(
+            [
+                {"Time worked": 5.5},
+                {"Time worked": 3.5},
+            ]
+        )
         result = prepare_fte_data(df, 34.0, (100, 119), TECH_MAP, TASK_CATS)
         assert abs(result["weekly"].iloc[0]["total_hours"] - 9.0) < 0.01

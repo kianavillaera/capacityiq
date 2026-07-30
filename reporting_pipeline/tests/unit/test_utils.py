@@ -4,8 +4,6 @@ import logging
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.utils import setup_logging, timer
@@ -22,6 +20,7 @@ class TestSetupLogging:
 
     def test_file_handler_created_when_log_dir_given(self, tmp_path):
         from logging.handlers import RotatingFileHandler
+
         log = setup_logging(log_dir=tmp_path)
         assert any(isinstance(h, RotatingFileHandler) for h in log.handlers)
 
@@ -39,9 +38,8 @@ class TestSetupLogging:
 
 class TestTimer:
     def test_logs_start_and_end(self, caplog):
-        with caplog.at_level(logging.INFO):
-            with timer("test_block"):
-                pass
+        with caplog.at_level(logging.INFO), timer("test_block"):
+            pass
         messages = caplog.messages
         assert any("test_block" in m for m in messages)
 
@@ -53,7 +51,6 @@ class TestTimer:
 
     def test_accepts_custom_logger(self, caplog):
         custom = logging.getLogger("custom_test")
-        with caplog.at_level(logging.INFO, logger="custom_test"):
-            with timer("y", logger=custom):
-                pass
+        with caplog.at_level(logging.INFO, logger="custom_test"), timer("y", logger=custom):
+            pass
         assert any("y" in m for m in caplog.messages)
