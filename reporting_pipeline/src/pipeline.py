@@ -29,6 +29,49 @@ from src.utils import timer, rotate_to_history
 logger = logging.getLogger(__name__)
 
 
+def _last_complete_week_end(tc_raw: pd.DataFrame,
+                             completeness_ratio: float = 0.5) -> pd.Timestamp:
+    """Return the last day (Sunday) of the last *complete* week in the data.
+
+    A week is considered complete when its unique-user count and total hours are
+    both ≥ ``completeness_ratio`` × the median across all earlier weeks.  This
+    automatically excludes sparse trailing weeks that come from a mid-week
+    extract (e.g. the extract was run on a Wednesday so only Mon-Tue data exists
+    for the current week).
+
+    The returned value can be used directly as ``month_end``.
+    """
+    tc_raw = tc_raw.copy()
+    tc_raw["_ws"] = (
+        tc_raw["Date"] - pd.to_timedelta(tc_raw["Date"].dt.weekday, unit="D")
+    ).dt.normalize()
+    wk = (
+        tc_raw.groupby("_ws")
+        .agg(users=("User ID", "nunique"), hours=("Time worked", "sum"))
+        .sort_index()
+    )
+    if len(wk) <= 1:
+        last_ws = wk.index[-1]
+        return last_ws + pd.Timedelta(days=6)          # Sunday of that week
+
+    # Reference median from the first 75% of weeks (avoids sparse tail bias)
+    n_ref = max(1, int(len(wk) * 0.75))
+    med_users = wk["users"].iloc[:n_ref].median()
+    med_hours = wk["hours"].iloc[:n_ref].median()
+
+    # Walk backwards to find the last week that looks complete
+    for ws in reversed(wk.index):
+        if (wk.loc[ws, "users"] >= completeness_ratio * med_users and
+                wk.loc[ws, "hours"] >= completeness_ratio * med_hours):
+            logger.info(
+                "Last complete week detected: %s  (users=%d, hours=%.0f)",
+                ws.date(), wk.loc[ws, "users"], wk.loc[ws, "hours"],
+            )
+            return ws + pd.Timedelta(days=6)           # Sunday of that week
+
+    return wk.index[0] + pd.Timedelta(days=6)
+
+
 def _auto_sub_periods(month_start: pd.Timestamp, month_end: pd.Timestamp) -> list:
     """Auto-generate sub-periods per calendar month, aligned to ISO week boundaries.
 
@@ -280,12 +323,13 @@ def run_monthly_attendance_pipeline(
 
         # ── Auto-detect period from data when not explicitly supplied ─────────
         _data_min = tc_raw["Date"].min().normalize()
-        _data_max = tc_raw["Date"].max().normalize()
 
         if month_start is None:
             month_start = _data_min
         if month_end is None:
-            month_end = _data_max
+            # Use the last *complete* week's Sunday, not the raw max date.
+            # This automatically drops sparse trailing weeks from mid-week extracts.
+            month_end = _last_complete_week_end(tc_raw)
         if month_label is None:
             _s = month_start.strftime("%b")
             _e = month_end.strftime("%b %Y")
