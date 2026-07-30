@@ -117,8 +117,43 @@ def clean_resources(df: pd.DataFrame, uid_overrides: dict | None = None) -> pd.D
 
     df = df.copy()
     df["Name"] = df["Name"].astype(str).str.strip()
+    if "is_exception" in df.columns:
+        df["is_exception"] = (
+            pd.to_numeric(df["is_exception"], errors="coerce").fillna(0).astype(int)
+        )
+    if "tc_uid_override" in df.columns:
+        df["tc_uid_override"] = (
+            df["tc_uid_override"].astype(str).str.strip().replace({"nan": "", "None": ""})
+        )
     df["_uid"] = df["Email"].str.extract(r"^([^@]+)@", expand=False).str.lower()
     df["_norm"] = df["Name"].map(lambda n: normalise_name(_ascii(n)))
     df["tc_uid"] = None
     logger.info("Resources: %d roster members", len(df))
     return df
+
+
+def extract_compliance_config(df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
+    """Derive partial-hours exceptions and UID overrides from the Resources file.
+
+    Returns (exceptions, uid_overrides) where exceptions is a list of exact
+    roster Names (e.g. 'Aguis, Noel') for rows where is_exception == 1, and
+    uid_overrides maps tc_uid_override value -> Name for rows with an override.
+    Returns empty structures when the expected columns are absent.
+    """
+    exceptions: list[str] = []
+    uid_overrides: dict[str, str] = {}
+
+    if "is_exception" in df.columns:
+        mask = pd.to_numeric(df["is_exception"], errors="coerce").fillna(0) == 1
+        exceptions = df.loc[mask, "Name"].dropna().astype(str).str.strip().tolist()
+
+    if "tc_uid_override" in df.columns:
+        valid = (df["tc_uid_override"].notna()) & (
+            df["tc_uid_override"].astype(str).str.strip() != ""
+        )
+        for _, row in df[valid].iterrows():
+            uid = str(row["tc_uid_override"]).strip().lower()
+            if uid:
+                uid_overrides[uid] = str(row["Name"]).strip()
+
+    return exceptions, uid_overrides

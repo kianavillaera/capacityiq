@@ -44,19 +44,27 @@ def _month_slug(month_label: str) -> str:
 
 
 def _is_exception(name: str, exceptions: list) -> bool:
-    """Return True if this roster name belongs to a partial-hours exception.
+    """Return True if this roster name is in the partial-hours exceptions list.
 
-    Matches against the first-name part (after the comma in 'Surname, Firstname').
-    The check is case-insensitive and bidirectional so both 'Mark' and 'Mark Anthony'
-    will match an exception entry of 'Mark Anthony'.
+    Tries exact full-name match first (used when exceptions come from the
+    Resources.xlsx is_exception column, e.g. 'Aguis, Noel').  Falls back to
+    bidirectional first-name fragment matching only for entries without a comma
+    (legacy .env PARTIAL_HOURS_EXCEPTIONS format, e.g. 'Noel').
+
+    Keeping comma-free entries separate eliminates false positives like
+    'Peterson, Oluwaseun James' matching the fragment 'James'.
     """
     if not exceptions or not name:
         return False
-    parts = str(name).split(",", 1)
+    name_str = str(name).strip()
+    if name_str in {str(e).strip() for e in exceptions}:
+        return True
+    parts = name_str.split(",", 1)
     first = (parts[1] if len(parts) > 1 else parts[0]).strip().lower()
     return any(
         exc.strip().lower() == first or exc.strip().lower() in first or first in exc.strip().lower()
         for exc in exceptions
+        if "," not in str(exc)
     )
 
 

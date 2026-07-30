@@ -264,6 +264,18 @@ def match_roster_to_timecard(
         res["_norm"].map(tc_uid_by_norm),
     )
 
+    # tc_uid_override column in Resources.xlsx takes precedence over .env overrides
+    if "tc_uid_override" in res.columns:
+        override_mask = (
+            res["tc_uid_override"].notna()
+            & (res["tc_uid_override"].astype(str).str.strip() != "")
+            & res["tc_uid"].isna()
+        )
+        res.loc[override_mask, "tc_uid"] = (
+            res.loc[override_mask, "tc_uid_override"].str.strip().str.lower()
+        )
+
+    # .env uid_overrides as fallback for anything still unmatched
     if uid_overrides:
         for uid, name in uid_overrides.items():
             res.loc[(res["Name"] == name) & res["tc_uid"].isna(), "tc_uid"] = uid

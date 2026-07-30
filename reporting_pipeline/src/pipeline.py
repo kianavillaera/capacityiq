@@ -271,6 +271,9 @@ def run_weekly_attendance_pipeline(
     with timer("cleaning", logger):
         tc, tc_oncall = transformations.clean_timecard_for_attendance(tc_raw)
         resources = transformations.clean_resources(resources_raw, UID_OVERRIDES)
+        _exc, _uid_ov = transformations.extract_compliance_config(resources)
+        partial_hours_exceptions = _exc or PARTIAL_HOURS_EXCEPTIONS
+        uid_overrides = {**UID_OVERRIDES, **_uid_ov}
 
     week = tc["week_start"].max()
     tc_week = tc[tc["week_start"] == week]
@@ -279,7 +282,7 @@ def run_weekly_attendance_pipeline(
     logger.info("Analysing week: %s  (%d rows)", week.date(), len(tc_week))
 
     with timer("roster matching", logger):
-        resources_matched = mappings.match_roster_to_timecard(resources, tc_week, UID_OVERRIDES)
+        resources_matched = mappings.match_roster_to_timecard(resources, tc_week, uid_overrides)
 
     with timer("attendance computation", logger):
         roster, orphans, ghost, incomplete, full, day_cols = (
@@ -289,7 +292,7 @@ def run_weekly_attendance_pipeline(
                 resources_matched,
                 week,
                 hours_threshold,
-                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
+                partial_hours_exceptions=partial_hours_exceptions,
             )
         )
 
@@ -419,6 +422,9 @@ def run_monthly_attendance_pipeline(
         else:
             tc_oncall = tc_oncall_file
         resources = transformations.clean_resources(resources_raw, UID_OVERRIDES)
+        _exc, _uid_ov = transformations.extract_compliance_config(resources)
+        partial_hours_exceptions = _exc or PARTIAL_HOURS_EXCEPTIONS
+        uid_overrides = {**UID_OVERRIDES, **_uid_ov}
 
     weeks = sorted(tc["week_start"].unique())
 
@@ -435,7 +441,7 @@ def run_monthly_attendance_pipeline(
     )
 
     with timer("roster matching", logger):
-        resources_matched = mappings.match_roster_to_timecard(resources, tc, UID_OVERRIDES)
+        resources_matched = mappings.match_roster_to_timecard(resources, tc, uid_overrides)
 
     with timer("attendance computation", logger):
         roster, orphans, ghost, incomplete, full, wk_cols = (
@@ -446,7 +452,7 @@ def run_monthly_attendance_pipeline(
                 weeks,
                 month_threshold,
                 hours_threshold,
-                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
+                partial_hours_exceptions=partial_hours_exceptions,
             )
         )
 
@@ -464,7 +470,7 @@ def run_monthly_attendance_pipeline(
             if len(tc_w) == 0:
                 continue
 
-            res_w = mappings.match_roster_to_timecard(resources, tc_w, UID_OVERRIDES)
+            res_w = mappings.match_roster_to_timecard(resources, tc_w, uid_overrides)
             week_dates = sorted(tc_w["Date"].dt.normalize().unique())
             day_cols_w = [d.strftime("%a %d/%m") for d in week_dates]
 
@@ -474,7 +480,7 @@ def run_monthly_attendance_pipeline(
                 res_w,
                 w,
                 hours_threshold,
-                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
+                partial_hours_exceptions=partial_hours_exceptions,
             )
             week_rosters[w] = (roster_w, orphans_w, day_cols_w)
 
@@ -488,7 +494,7 @@ def run_monthly_attendance_pipeline(
                 logger.warning("Sub-period %s: no data found, skipping.", sp_label)
                 continue
             sp_thresh = len(weeks_sp) * hours_threshold
-            res_sp = mappings.match_roster_to_timecard(resources, tc_sp, UID_OVERRIDES)
+            res_sp = mappings.match_roster_to_timecard(resources, tc_sp, uid_overrides)
             _, _, _, _, full_sp, _ = report_generator.build_monthly_attendance(
                 tc_sp,
                 tc_oc_sp,
@@ -496,7 +502,7 @@ def run_monthly_attendance_pipeline(
                 weeks_sp,
                 sp_thresh,
                 hours_threshold,
-                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
+                partial_hours_exceptions=partial_hours_exceptions,
             )
             sub_period_rosters.append((sp_label, full_sp, sp_thresh))
             logger.info(
