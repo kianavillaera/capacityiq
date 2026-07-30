@@ -406,35 +406,64 @@ def page_monthly_attendance():
         tc_data_upload = st.file_uploader("timecard_data.xlsx", type=["xlsx"], help="Output of the FTE Data Prep page")
         res_upload     = st.file_uploader("Resources.xlsx", type=["xlsx"])
         st.divider()
+
+        # ── Auto-detect period from the uploaded file ──────────────────────────
+        _detected_start, _detected_end = None, None
+        if tc_data_upload:
+            try:
+                _peek = pd.read_excel(io.BytesIO(tc_data_upload.getvalue()),
+                                       sheet_name="with_gen", usecols=["Date"])
+                _peek["Date"] = pd.to_datetime(_peek["Date"], errors="coerce")
+                _detected_start = _peek["Date"].min().date()
+                _detected_end   = _peek["Date"].max().date()
+            except Exception:
+                pass
+
         st.header("Period")
-        month_start = st.date_input("From", value=pd.Timestamp("2026-07-01").date())
-        month_end   = st.date_input("To",   value=pd.Timestamp("2026-07-19").date())
-        month_label = st.text_input("Label", value="Jul 2026")
+        st.caption("Dates are auto-detected from your file. Override if needed.")
+        month_start = st.date_input("From", value=_detected_start or pd.Timestamp("2026-06-01").date())
+        month_end   = st.date_input("To",   value=_detected_end   or pd.Timestamp("2026-07-26").date())
+
+        # Auto-generate month label from dates
+        _auto_label = (
+            pd.Timestamp(month_start).strftime("%b %Y")
+            if pd.Timestamp(month_start).strftime("%b %Y") == pd.Timestamp(month_end).strftime("%b %Y")
+            else f"{pd.Timestamp(month_start).strftime('%b')}-{pd.Timestamp(month_end).strftime('%b %Y')}"
+        )
+        month_label = st.text_input("Label", value=_auto_label)
         st.divider()
         st.header("Thresholds")
         week_threshold  = st.number_input("Weekly (h)",  min_value=1, value=settings.HOURS_THRESHOLD_WEEKLY)
-        month_threshold = st.number_input("Monthly (h)", min_value=1, value=settings.HOURS_THRESHOLD_MONTHLY)
+        _auto_threshold = st.checkbox("Auto-compute monthly threshold from data", value=True)
+        month_threshold = (
+            0 if _auto_threshold
+            else st.number_input("Monthly (h)", min_value=1, value=settings.HOURS_THRESHOLD_MONTHLY)
+        )
+        if _auto_threshold:
+            st.caption("Monthly threshold = weeks detected × weekly threshold")
         st.divider()
         st.header("Sub-period pages")
-        st.caption("Each enabled sub-period gets its own full-roster sheet in the download.")
-        sp1_on    = st.checkbox("Sub-period 1", value=True, key="sp1_on")
-        sp1_label = st.text_input("Label", value="Jun 2026", key="sp1_label") if sp1_on else None
-        sp1_start = st.date_input("From", value=pd.Timestamp("2026-06-01").date(), key="sp1_start") if sp1_on else None
-        # End on Sunday 5 Jul so the Jun 29 week is fully included in June
-        sp1_end   = st.date_input("To",   value=pd.Timestamp("2026-07-05").date(), key="sp1_end")   if sp1_on else None
-        sp2_on    = st.checkbox("Sub-period 2", value=True, key="sp2_on")
-        sp2_label = st.text_input("Label", value="Jul 2026", key="sp2_label") if sp2_on else None
-        # Start on Monday 6 Jul so July begins on a clean week boundary
-        sp2_start = st.date_input("From", value=pd.Timestamp("2026-07-06").date(), key="sp2_start") if sp2_on else None
-        sp2_end   = st.date_input("To",   value=pd.Timestamp("2026-07-26").date(), key="sp2_end")   if sp2_on else None
-        sub_periods_cfg = tuple(
-            (lbl, str(s), str(e))
-            for on, lbl, s, e in [
-                (sp1_on, sp1_label, sp1_start, sp1_end),
-                (sp2_on, sp2_label, sp2_start, sp2_end),
-            ]
-            if on and lbl
-        )
+        st.caption("Auto-generated from your period. Override or disable as needed.")
+        _use_auto_sp = st.checkbox("Auto-generate sub-periods by calendar month", value=True)
+        if _use_auto_sp:
+            sub_periods_cfg = ()   # pipeline will call _auto_sub_periods internally
+        else:
+            sp1_on    = st.checkbox("Sub-period 1", value=True, key="sp1_on")
+            sp1_label = st.text_input("Label", value="Jun 2026", key="sp1_label") if sp1_on else None
+            sp1_start = st.date_input("From", value=pd.Timestamp("2026-06-01").date(), key="sp1_start") if sp1_on else None
+            sp1_end   = st.date_input("To",   value=pd.Timestamp("2026-07-05").date(), key="sp1_end")   if sp1_on else None
+            sp2_on    = st.checkbox("Sub-period 2", value=True, key="sp2_on")
+            sp2_label = st.text_input("Label", value="Jul 2026", key="sp2_label") if sp2_on else None
+            sp2_start = st.date_input("From", value=pd.Timestamp("2026-07-06").date(), key="sp2_start") if sp2_on else None
+            sp2_end   = st.date_input("To",   value=pd.Timestamp("2026-07-26").date(), key="sp2_end")   if sp2_on else None
+            sub_periods_cfg = tuple(
+                (lbl, str(s), str(e))
+                for on, lbl, s, e in [
+                    (sp1_on, sp1_label, sp1_start, sp1_end),
+                    (sp2_on, sp2_label, sp2_start, sp2_end),
+                ]
+                if on and lbl
+            )
 
     st.title("📅 Monthly Compliance Analysis")
 
@@ -463,9 +492,11 @@ def page_monthly_attendance():
             tc, tc_oncall = transformations.clean_timecard_for_attendance(tc_raw)
             resources = transformations.clean_resources(res_raw, settings.UID_OVERRIDES)
             weeks = sorted(tc["week_start"].unique())
+            # m_thresh=0 means "auto" — compute from week count
+            effective_thresh = m_thresh if m_thresh > 0 else len(weeks) * w_thresh
             res_m = mappings.match_roster_to_timecard(resources, tc, settings.UID_OVERRIDES)
             roster, orphans, ghost, incomplete, full, wk_cols = report_generator.build_monthly_attendance(
-                tc, tc_oncall, res_m, weeks, m_thresh, w_thresh
+                tc, tc_oncall, res_m, weeks, effective_thresh, w_thresh
             )
             week_rosters = {}
             for w in weeks:
@@ -508,18 +539,21 @@ def page_monthly_attendance():
             return
 
     n = len(roster)
-    compliant = int((roster["hours_logged"] >= month_threshold).sum())
+    # effective threshold: auto (0) means weeks × weekly_threshold
+    eff_thresh = month_threshold if month_threshold > 0 else len(wk_cols) * week_threshold
+    compliant  = int((roster["hours_logged"] >= eff_thresh).sum())
     st.subheader(f"✅ {month_label}  ({ms.date()} → {me.date()})")
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total roster",                   str(n))
-    m2.metric(f"Compliant (≥ {month_threshold} h)", f"{compliant}  ({compliant/n*100:.0f}%)")
-    m3.metric("Incomplete",                     f"{len(incomplete)}  ({len(incomplete)/n*100:.0f}%)")
-    m4.metric("Ghost (0 h)",                    f"{len(ghost)}  ({len(ghost)/n*100:.0f}%)")
+    m1.metric("Total roster",                  str(n))
+    m2.metric(f"Compliant (≥ {eff_thresh} h)", f"{compliant}  ({compliant/n*100:.0f}%)")
+    m3.metric("Incomplete",                    f"{len(incomplete)}  ({len(incomplete)/n*100:.0f}%)")
+    m4.metric("Ghost (0 h)",                   f"{len(ghost)}  ({len(ghost)/n*100:.0f}%)")
 
-    m5, m6 = st.columns(2)
+    m5, m6, m7 = st.columns(3)
     m5.metric("Orphan TC users", str(len(orphans)))
     m6.metric("Weeks analysed",  str(len(week_rosters)))
+    m7.metric("Threshold used",  f"{eff_thresh} h  ({'auto' if month_threshold == 0 else 'manual'})")
 
     st.divider()
     tab_full, tab_ghost, tab_inc, tab_weeks, tab_orphan = st.tabs(

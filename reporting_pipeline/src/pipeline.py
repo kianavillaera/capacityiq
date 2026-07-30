@@ -24,9 +24,54 @@ from config.settings import (
 )
 from src import loaders, validators, transformations, reconciliation as recon_engine
 from src import exporters, fte_prep, report_generator, mappings
-from src.utils import timer
+from src.utils import timer, rotate_to_history
 
 logger = logging.getLogger(__name__)
+
+
+def _auto_sub_periods(month_start: pd.Timestamp, month_end: pd.Timestamp) -> list:
+    """Auto-generate sub-periods per calendar month, aligned to ISO week boundaries.
+
+    Each sub-period starts on the first Monday on or after the 1st of that
+    calendar month, and ends on the Sunday before the first Monday of the next
+    month (or on month_end for the last month).  No hardcoded dates required.
+
+    Examples (Jun-Jul 2026)::
+
+        ('Jun 2026', 2026-06-01, 2026-07-05)  # 5 full weeks
+        ('Jul 2026', 2026-07-06, 2026-07-26)  # 3 full weeks
+    """
+    # Enumerate distinct calendar months between month_start and month_end
+    m = pd.Timestamp(month_start.year, month_start.month, 1)
+    months: list[pd.Timestamp] = []
+    while m <= pd.Timestamp(month_end.year, month_end.month, 1):
+        months.append(m)
+        m = m + pd.DateOffset(months=1)
+
+    if len(months) <= 1:
+        return []  # single-month period — no sub-split needed
+
+    sub_periods = []
+    for i, m_first in enumerate(months):
+        # First Monday on or after the 1st of this month
+        days_fwd = (7 - m_first.weekday()) % 7
+        sp_start = m_first + pd.Timedelta(days=days_fwd)
+        if i == 0:
+            sp_start = max(sp_start, month_start)
+
+        if i < len(months) - 1:
+            # Sunday before the first Monday of the next calendar month
+            next_first = months[i + 1]
+            days_fwd_next = (7 - next_first.weekday()) % 7
+            sp_end = next_first + pd.Timedelta(days=days_fwd_next) - pd.Timedelta(days=1)
+        else:
+            sp_end = month_end
+
+        if sp_start <= sp_end:
+            label = m_first.strftime("%b %Y")   # e.g. 'Jun 2026'
+            sub_periods.append((label, sp_start, sp_end))
+
+    return sub_periods
 
 def run_reconciliation_pipeline(
     replicon_dir: Path,
@@ -120,8 +165,13 @@ def run_fte_pipeline(
 
     with timer("export", logger):
         output_dir = Path(output_dir)
-        fte_output = output_dir / f"powerbi_fte_weekly_{timestamp}.xlsx"
-        tc_output = output_dir / f"timecard_data_{timestamp}.xlsx"
+        # Fixed filenames so Power BI can always refresh from the same path.
+        # Previous files are moved to history/ before being overwritten.
+        fte_output = output_dir / "powerbi_fte_weekly.xlsx"
+        tc_output  = output_dir / "timecard_data.xlsx"
+
+        rotate_to_history(fte_output, timestamp)
+        rotate_to_history(tc_output,  timestamp)
 
         exporters.export_fte_workbook(fte_results, fte_output)
         exporters.export_timecard_data(df, tc_output)
@@ -194,18 +244,28 @@ def run_weekly_attendance_pipeline(
 def run_monthly_attendance_pipeline(
     timecard_data_path: Path,
     resources_path: Path,
-    month_start: pd.Timestamp,
-    month_end: pd.Timestamp,
-    month_label: str,
+    month_start: Optional[pd.Timestamp] = None,   # auto-detected if None
+    month_end: Optional[pd.Timestamp] = None,     # auto-detected if None
+    month_label: Optional[str] = None,            # auto-generated if None
     output_dir: Path = REPORTS_DIR,
     resources_sheet: str = RESOURCES_SHEET,
     hours_threshold: int = HOURS_THRESHOLD_WEEKLY,
-    month_threshold: int = HOURS_THRESHOLD_MONTHLY,
+    month_threshold: Optional[int] = None,        # auto-computed if None
     timestamp: str = TIMESTAMP,
-    sub_periods: Optional[list] = None,  # list of (label, start_ts, end_ts)
+    sub_periods: Optional[list] = None,  # list of (label, start_ts, end_ts); auto-generated if None
 ) -> dict:
-    """Run the monthly attendance analysis. Reads from timecard_data.xlsx (FTE pipeline output)."""
-    logger.info("Monthly attendance pipeline starting: %s", month_label)
+    """Run the monthly attendance analysis. Reads from timecard_data.xlsx (FTE pipeline output).
+
+    All date/period parameters are optional.  When omitted the pipeline inspects
+    the timecard file and infers sensible defaults automatically:
+
+    * ``month_start`` / ``month_end`` — full date range present in the file
+    * ``month_label`` — derived from the months spanned (e.g. 'Jun-Jul 2026')
+    * ``month_threshold`` — ``len(weeks) × hours_threshold``
+    * ``sub_periods`` — one sub-period per calendar month, aligned to Mon-Sun week
+      boundaries (e.g. Jun 1–Jul 5, Jul 6–Jul 26)
+    """
+    logger.info("Monthly attendance pipeline starting.")
 
     with timer("input validation", logger):
         validators.validate_files_exist([timecard_data_path, resources_path])
@@ -217,6 +277,26 @@ def run_monthly_attendance_pipeline(
             tc_raw["Date"] - pd.to_timedelta(tc_raw["Date"].dt.weekday, unit="D")
         ).dt.normalize()
         tc_raw["Time worked"] = pd.to_numeric(tc_raw["Time worked"], errors="coerce").fillna(0)
+
+        # ── Auto-detect period from data when not explicitly supplied ─────────
+        _data_min = tc_raw["Date"].min().normalize()
+        _data_max = tc_raw["Date"].max().normalize()
+
+        if month_start is None:
+            month_start = _data_min
+        if month_end is None:
+            month_end = _data_max
+        if month_label is None:
+            _s = month_start.strftime("%b")
+            _e = month_end.strftime("%b %Y")
+            month_label = _e if month_start.strftime("%b %Y") == _e else f"{_s}-{_e}"
+        if sub_periods is None:
+            sub_periods = _auto_sub_periods(month_start, month_end)
+        # ─────────────────────────────────────────────────────────────────────
+
+        logger.info("Monthly attendance pipeline: %s (%s → %s)",
+                    month_label, month_start.date(), month_end.date())
+
         _meta_cols = [c for c in ("_source_file",) if c in tc_raw.columns]
         tc_raw = (
             tc_raw[(tc_raw["Date"] >= month_start) & (tc_raw["Date"] <= month_end)]
@@ -255,7 +335,13 @@ def run_monthly_attendance_pipeline(
         resources = transformations.clean_resources(resources_raw, UID_OVERRIDES)
 
     weeks = sorted(tc["week_start"].unique())
-    logger.info("Analysis period: %s to %s (%d weeks)", month_start.date(), month_end.date(), len(weeks))
+
+    # Auto-compute monthly threshold if not supplied
+    if month_threshold is None:
+        month_threshold = len(weeks) * hours_threshold
+
+    logger.info("Analysis period: %s to %s (%d weeks, threshold=%dh)",
+                month_start.date(), month_end.date(), len(weeks), month_threshold)
 
     with timer("roster matching", logger):
         resources_matched = mappings.match_roster_to_timecard(resources, tc, UID_OVERRIDES)
@@ -314,7 +400,11 @@ def run_monthly_attendance_pipeline(
                 sp_label, len(weeks_sp), sp_thresh,
                 int((full_sp["hours_logged"] >= sp_thresh).sum()), len(full_sp),
             )
-        output_path = output_dir / f"compliance_{month_label.replace(' ', '_').replace('/', '-')}_{timestamp}.xlsx"
+        # Fixed filename so Power BI can always refresh from the same path.
+        # The previous file is moved to history/ before being overwritten.
+        label_safe  = month_label.replace(" ", "_").replace("/", "-")
+        output_path = output_dir / f"compliance_{label_safe}.xlsx"
+        rotate_to_history(output_path, timestamp)
         report_generator.write_monthly_attendance_report(
             output_path, full, ghost, incomplete, orphans, wk_cols,
             week_rosters, month_label, hours_threshold, month_threshold,
