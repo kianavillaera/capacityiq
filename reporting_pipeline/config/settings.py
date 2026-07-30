@@ -47,7 +47,16 @@ UID_OVERRIDES: dict = json.loads(os.getenv("UID_OVERRIDES", "{}"))
 # JSON array of first-name strings for members on reduced-hours arrangements.
 # These members are Compliant if they log any hours at all (threshold does not apply).
 PARTIAL_HOURS_EXCEPTIONS: list = json.loads(os.getenv("PARTIAL_HOURS_EXCEPTIONS", "[]"))
-# ──────────────────────────────────────────────────────────────────────────────
+# FTE = hours / (40 * utilisation). Agreed utilisation rate with client.
+UTILIZATION_RATE: float = float(os.getenv("UTILIZATION_RATE", "0.85"))
+HOURS_PER_FTE: float = round(40 * UTILIZATION_RATE, 4)
+
+# Target weekly FTE band for the Power BI in-band flag. JSON array [lower, upper].
+FTE_BAND: tuple = tuple(json.loads(os.getenv("FTE_BAND", "[100, 119]")))
+
+# Technology names from the time-card export mapped to Power BI report groups.
+# JSON object loaded from .env so the client's tech stack is not in source control.
+TECH_MAP: dict = json.loads(os.getenv("TECH_MAP", "{}"))# ──────────────────────────────────────────────────────────────────────────────
 
 # If this file exists it overrides the auto-generated fuzzy matches.
 # Export the auto-generated mapping, correct any wrong rows, save under
@@ -65,24 +74,6 @@ REVIEW_LOW_THRESHOLD: float = 0.70
 # compliant = >= 40 h/week; monthly = 5 full weeks x 40 h
 HOURS_THRESHOLD_WEEKLY: int = 40
 HOURS_THRESHOLD_MONTHLY: int = 200
-
-# FTE = hours / (40 * utilisation). 34 h/week per FTE at 85% utilisation.
-UTILIZATION_RATE: float = 0.85
-HOURS_PER_FTE: float = round(40 * UTILIZATION_RATE, 4)
-FTE_BAND: tuple = (100, 119)
-
-# Technology names from the time-card export mapped to Power BI report groups.
-TECH_MAP: dict = {
-    "Dynamics 365 FO": "F&O",
-    "Dynamics 365 FSCM": "F&O",
-    "Dynamics 365 CE": "CE",
-    "Dynamics 365 BC": "BC",
-    "Dynamics NAV": "BC",
-    "Microsoft Azure": "Azure Integ",
-    "Microsoft Cloud Data Warehouse": "Inf Mgmt",
-    "Microsoft Cloud Support Infrastructure": "Inf Mgmt",
-    "Power Platform": "Power Platform",
-}
 
 # Graph 2 (no-GEN) counts Task work and Sick/Holiday as billable task hours.
 TASK_CATEGORIES: list = ["Task work", "Sick/Holiday"]
