@@ -16,6 +16,7 @@ from config.settings import (
     TECH_MAP,
     TASK_CATEGORIES,
     UID_OVERRIDES,
+    PARTIAL_HOURS_EXCEPTIONS,
     RESOURCES_SHEET,
     TIMESTAMP,
     REPORTS_DIR,
@@ -91,7 +92,10 @@ def run_fte_pipeline(
 
     # On-call rows are excluded from FTE totals but tracked in the source data.
     with timer("cleaning", logger):
-        df_raw = df_raw.drop_duplicates(keep="last")
+        # Exclude pipeline-generated meta columns from dedup so rows from overlapping
+        # extracts (same user/date/task but different _source_file) are collapsed.
+        _meta = [c for c in ("_source_file", "_sheet") if c in df_raw.columns]
+        df_raw = df_raw.drop_duplicates(subset=[c for c in df_raw.columns if c not in _meta], keep="last")
         is_oncall = df_raw["Rate type"].astype(str).str.contains("On-Call", case=False, na=False)
         df = df_raw[~is_oncall].copy()
         df["Time worked"] = pd.to_numeric(df["Time worked"], errors="coerce").fillna(0)
@@ -163,12 +167,13 @@ def run_weekly_attendance_pipeline(
     with timer("attendance computation", logger):
         roster, orphans, ghost, incomplete, full, day_cols = (
             report_generator.build_weekly_attendance(
-                tc_week, tc_oncall_week, resources_matched, week, hours_threshold
+                tc_week, tc_oncall_week, resources_matched, week, hours_threshold,
+                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
             )
         )
 
     with timer("export", logger):
-        output_path = output_dir / f"attendance_{week.date()}_{timestamp}.xlsx"
+        output_path = output_dir / f"compliance_{week.date()}_{timestamp}.xlsx"
         report_generator.write_weekly_attendance_report(
             output_path, full, ghost, incomplete, orphans, day_cols, week, hours_threshold
         )
@@ -197,6 +202,7 @@ def run_monthly_attendance_pipeline(
     hours_threshold: int = HOURS_THRESHOLD_WEEKLY,
     month_threshold: int = HOURS_THRESHOLD_MONTHLY,
     timestamp: str = TIMESTAMP,
+    sub_periods: Optional[list] = None,  # list of (label, start_ts, end_ts)
 ) -> dict:
     """Run the monthly attendance analysis. Reads from timecard_data.xlsx (FTE pipeline output)."""
     logger.info("Monthly attendance pipeline starting: %s", month_label)
@@ -211,15 +217,41 @@ def run_monthly_attendance_pipeline(
             tc_raw["Date"] - pd.to_timedelta(tc_raw["Date"].dt.weekday, unit="D")
         ).dt.normalize()
         tc_raw["Time worked"] = pd.to_numeric(tc_raw["Time worked"], errors="coerce").fillna(0)
+        _meta_cols = [c for c in ("_source_file",) if c in tc_raw.columns]
         tc_raw = (
             tc_raw[(tc_raw["Date"] >= month_start) & (tc_raw["Date"] <= month_end)]
-            .drop_duplicates(keep="last")
+            .drop_duplicates(subset=[c for c in tc_raw.columns if c not in _meta_cols], keep="last")
             .reset_index(drop=True)
         )
+
+        # Load on-call rows from the dedicated sheet if available (written by the
+        # overlay/merge step). Gives hours_oncall visibility in the monthly report.
+        try:
+            oncall_raw = pd.read_excel(timecard_data_path, sheet_name="oncall")
+            oncall_raw["Date"] = pd.to_datetime(oncall_raw["Date"], errors="coerce")
+            oncall_raw["week_start"] = (
+                oncall_raw["Date"] - pd.to_timedelta(oncall_raw["Date"].dt.weekday, unit="D")
+            ).dt.normalize()
+            oncall_raw["Time worked"] = pd.to_numeric(oncall_raw["Time worked"], errors="coerce").fillna(0)
+            oncall_raw = oncall_raw[
+                (oncall_raw["Date"] >= month_start) & (oncall_raw["Date"] <= month_end)
+            ].reset_index(drop=True)
+            logger.info("Loaded %d on-call rows from 'oncall' sheet.", len(oncall_raw))
+        except Exception:
+            oncall_raw = pd.DataFrame()
+            logger.debug("No 'oncall' sheet in timecard file — hours_oncall will be 0.")
+
         resources_raw = loaders.load_resources(resources_path, resources_sheet)
 
     with timer("cleaning", logger):
-        tc, tc_oncall = transformations.clean_timecard_for_attendance(tc_raw)
+        tc, tc_oncall_file = transformations.clean_timecard_for_attendance(tc_raw)
+        # Prefer the dedicated oncall sheet; fall back to whatever clean_timecard extracted
+        if not oncall_raw.empty:
+            if "User ID" in oncall_raw.columns:
+                oncall_raw["_uid"] = oncall_raw["User ID"].str.strip().str.lower()
+            tc_oncall = oncall_raw
+        else:
+            tc_oncall = tc_oncall_file
         resources = transformations.clean_resources(resources_raw, UID_OVERRIDES)
 
     weeks = sorted(tc["week_start"].unique())
@@ -231,7 +263,8 @@ def run_monthly_attendance_pipeline(
     with timer("attendance computation", logger):
         roster, orphans, ghost, incomplete, full, wk_cols = (
             report_generator.build_monthly_attendance(
-                tc, tc_oncall, resources_matched, weeks, month_threshold, hours_threshold
+                tc, tc_oncall, resources_matched, weeks, month_threshold, hours_threshold,
+                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
             )
         )
 
@@ -256,14 +289,36 @@ def run_monthly_attendance_pipeline(
             roster_w, orphans_w, *_ = report_generator.build_weekly_attendance(
                 tc_w, tc_oc_w if not tc_oc_w.empty else pd.DataFrame(columns=tc_oncall.columns),
                 res_w, w, hours_threshold,
+                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
             )
-        week_rosters[w] = (roster_w, orphans_w, day_cols_w)
+            week_rosters[w] = (roster_w, orphans_w, day_cols_w)
 
-    with timer("export", logger):
+        # Build per-sub-period full rosters (e.g. June-only, July-only)
+        sub_period_rosters = []
+        for sp_label, sp_start, sp_end in (sub_periods or []):
+            tc_sp    = tc[(tc["Date"] >= sp_start) & (tc["Date"] <= sp_end)]
+            tc_oc_sp = tc_oncall[(tc_oncall["Date"] >= sp_start) & (tc_oncall["Date"] <= sp_end)]
+            weeks_sp = sorted(tc_sp["week_start"].unique())
+            if not weeks_sp:
+                logger.warning("Sub-period %s: no data found, skipping.", sp_label)
+                continue
+            sp_thresh = len(weeks_sp) * hours_threshold
+            res_sp = mappings.match_roster_to_timecard(resources, tc_sp, UID_OVERRIDES)
+            _, _, _, _, full_sp, _ = report_generator.build_monthly_attendance(
+                tc_sp, tc_oc_sp, res_sp, weeks_sp, sp_thresh, hours_threshold,
+                partial_hours_exceptions=PARTIAL_HOURS_EXCEPTIONS,
+            )
+            sub_period_rosters.append((sp_label, full_sp, sp_thresh))
+            logger.info(
+                "Sub-period %s (%d wks, \u2265%dh): compliant=%d/%d",
+                sp_label, len(weeks_sp), sp_thresh,
+                int((full_sp["hours_logged"] >= sp_thresh).sum()), len(full_sp),
+            )
         output_path = output_dir / f"compliance_{month_label.replace(' ', '_').replace('/', '-')}_{timestamp}.xlsx"
         report_generator.write_monthly_attendance_report(
             output_path, full, ghost, incomplete, orphans, wk_cols,
             week_rosters, month_label, hours_threshold, month_threshold,
+            sub_period_rosters=sub_period_rosters or None,
         )
 
     logger.info("Monthly attendance pipeline complete: %s", output_path)
@@ -276,6 +331,7 @@ def run_monthly_attendance_pipeline(
         "orphans": orphans,
         "wk_cols": wk_cols,
         "week_rosters": week_rosters,
+        "sub_period_rosters": sub_period_rosters,
         "output_path": output_path,
     }
 

@@ -75,3 +75,6 @@ outputs/exports/
 .env
 secrets.py
 REFACTOR_SUMMARY.md
+
+# Automation runtime artefacts
+automation/*.log

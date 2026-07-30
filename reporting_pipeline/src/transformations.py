@@ -57,7 +57,11 @@ def clean_timecard_for_attendance(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     """Split into (regular, on-call). On-call = 'On-Call' in Rate type."""
     from src.mappings import normalise_name
 
-    df = df.drop_duplicates(keep="last").copy()
+    # Exclude pipeline-generated meta columns from dedup so rows from overlapping
+    # extracts (same user/date/task but different _source_file) are collapsed.
+    _meta = [c for c in ("_source_file", "_sheet") if c in df.columns]
+    _dedup_cols = [c for c in df.columns if c not in _meta]
+    df = df.drop_duplicates(subset=_dedup_cols, keep="last").copy()
     df["Time worked"] = pd.to_numeric(df["Time worked"], errors="coerce").fillna(0)
     df["is_gen"] = df["Task"].astype(str).str.startswith("GEN")
 

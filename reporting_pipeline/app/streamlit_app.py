@@ -407,13 +407,34 @@ def page_monthly_attendance():
         res_upload     = st.file_uploader("Resources.xlsx", type=["xlsx"])
         st.divider()
         st.header("Period")
-        month_start = st.date_input("From", value=pd.Timestamp("2026-06-01").date())
-        month_end   = st.date_input("To",   value=pd.Timestamp("2026-07-05").date())
-        month_label = st.text_input("Label", value="Jun 2026")
+        month_start = st.date_input("From", value=pd.Timestamp("2026-07-01").date())
+        month_end   = st.date_input("To",   value=pd.Timestamp("2026-07-19").date())
+        month_label = st.text_input("Label", value="Jul 2026")
         st.divider()
         st.header("Thresholds")
         week_threshold  = st.number_input("Weekly (h)",  min_value=1, value=settings.HOURS_THRESHOLD_WEEKLY)
         month_threshold = st.number_input("Monthly (h)", min_value=1, value=settings.HOURS_THRESHOLD_MONTHLY)
+        st.divider()
+        st.header("Sub-period pages")
+        st.caption("Each enabled sub-period gets its own full-roster sheet in the download.")
+        sp1_on    = st.checkbox("Sub-period 1", value=True, key="sp1_on")
+        sp1_label = st.text_input("Label", value="Jun 2026", key="sp1_label") if sp1_on else None
+        sp1_start = st.date_input("From", value=pd.Timestamp("2026-06-01").date(), key="sp1_start") if sp1_on else None
+        # End on Sunday 5 Jul so the Jun 29 week is fully included in June
+        sp1_end   = st.date_input("To",   value=pd.Timestamp("2026-07-05").date(), key="sp1_end")   if sp1_on else None
+        sp2_on    = st.checkbox("Sub-period 2", value=True, key="sp2_on")
+        sp2_label = st.text_input("Label", value="Jul 2026", key="sp2_label") if sp2_on else None
+        # Start on Monday 6 Jul so July begins on a clean week boundary
+        sp2_start = st.date_input("From", value=pd.Timestamp("2026-07-06").date(), key="sp2_start") if sp2_on else None
+        sp2_end   = st.date_input("To",   value=pd.Timestamp("2026-07-26").date(), key="sp2_end")   if sp2_on else None
+        sub_periods_cfg = tuple(
+            (lbl, str(s), str(e))
+            for on, lbl, s, e in [
+                (sp1_on, sp1_label, sp1_start, sp1_end),
+                (sp2_on, sp2_label, sp2_start, sp2_end),
+            ]
+            if on and lbl
+        )
 
     st.title("📅 Monthly Compliance Analysis")
 
@@ -423,7 +444,7 @@ def page_monthly_attendance():
         return
 
     @st.cache_data(show_spinner=False)
-    def _run_monthly(tc_bytes, res_bytes, start_str, end_str, w_thresh, m_thresh):
+    def _run_monthly(tc_bytes, res_bytes, start_str, end_str, w_thresh, m_thresh, sub_periods_cfg=()):
         res_path = None
         try:
             ms = pd.Timestamp(start_str)
@@ -456,7 +477,20 @@ def page_monthly_attendance():
                 dc_w = [d.strftime("%a %d/%m") for d in week_dates]
                 roster_w, orphans_w, *_ = report_generator.build_weekly_attendance(tc_w, tc_oc, res_w, w, w_thresh)
                 week_rosters[w] = (roster_w, orphans_w, dc_w)
-            return roster, orphans, ghost, incomplete, full, wk_cols, week_rosters, ms, me
+            sub_period_rosters_list = []
+            for sp_label, sp_start_str, sp_end_str in sub_periods_cfg:
+                sp_s = pd.Timestamp(sp_start_str)
+                sp_e = pd.Timestamp(sp_end_str)
+                tc_sp    = tc[(tc["Date"] >= sp_s) & (tc["Date"] <= sp_e)]
+                tc_oc_sp = tc_oncall[(tc_oncall["Date"] >= sp_s) & (tc_oncall["Date"] <= sp_e)] if "week_start" in tc_oncall.columns else tc_oncall.iloc[:0]
+                weeks_sp = sorted(tc_sp["week_start"].unique())
+                if not weeks_sp:
+                    continue
+                sp_thresh = len(weeks_sp) * w_thresh
+                res_sp = mappings.match_roster_to_timecard(resources, tc_sp, settings.UID_OVERRIDES)
+                _, _, _, _, full_sp, _ = report_generator.build_monthly_attendance(tc_sp, tc_oc_sp, res_sp, weeks_sp, sp_thresh, w_thresh)
+                sub_period_rosters_list.append((sp_label, full_sp, sp_thresh))
+            return roster, orphans, ghost, incomplete, full, wk_cols, week_rosters, ms, me, sub_period_rosters_list
         finally:
             if res_path:
                 try: res_path.unlink()
@@ -464,9 +498,10 @@ def page_monthly_attendance():
 
     with st.spinner("Building monthly compliance report…"):
         try:
-            roster, orphans, ghost, incomplete, full, wk_cols, week_rosters, ms, me = _run_monthly(
+            roster, orphans, ghost, incomplete, full, wk_cols, week_rosters, ms, me, sub_period_rosters = _run_monthly(
                 tc_data_upload.getvalue(), res_upload.getvalue(),
                 str(month_start), str(month_end), week_threshold, month_threshold,
+                sub_periods_cfg,
             )
         except Exception as exc:
             st.error(f"Monthly analysis failed: {exc}")
@@ -510,24 +545,46 @@ def page_monthly_attendance():
     with tab_orphan:
         st.success("All TC users matched to roster") if orphans.empty else st.dataframe(orphans, use_container_width=True, hide_index=True)
 
+    if sub_period_rosters:
+        st.divider()
+        st.subheader("📊 Sub-period breakdowns")
+        sp_tabs = st.tabs([f"📋 {sp_label}" for sp_label, _, _ in sub_period_rosters])
+        for sp_tab, (sp_label, sp_full, sp_thresh) in zip(sp_tabs, sub_period_rosters):
+            with sp_tab:
+                n_sp = len(sp_full)
+                c_sp = int((sp_full["hours_logged"] >= sp_thresh).sum())
+                sc1, sc2, sc3 = st.columns(3)
+                sc1.metric(f"Compliant (\u2265 {sp_thresh} h)", f"{c_sp}  ({c_sp/n_sp*100:.0f}%)")
+                sc2.metric("Incomplete", str(int(((sp_full["hours_logged"] > 0) & (sp_full["hours_logged"] < sp_thresh)).sum())))
+                sc3.metric("Ghost (0 h)", str(int((sp_full["hours_logged"] == 0).sum())))
+                st.dataframe(sp_full, use_container_width=True, hide_index=True)
+
     st.divider()
 
-    def _monthly_bytes(full_df, ghost_df, inc_df, orph_df, week_ros, w_thresh_inner):
+    def _monthly_bytes(full_df, ghost_df, inc_df, orph_df, week_ros, w_thresh_inner, sp_ros=()):
         buf = io.BytesIO()
+        slug = month_label.strip().split()[0].lower()
+        sheet_full    = f"{slug}_full_roster"
+        sheet_ghost   = f"ghost_{slug}"
+        sheet_inc     = f"incomplete_{slug}"
+        sheet_orphans = f"orphans_{slug}"
         ocols = [c for c in ["_uid","name_tc","hours_logged","hours_task","hours_gen","hours_other","hours_oncall","days_logged"] if c in orph_df.columns]
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            full_df.to_excel(w, sheet_name="june_full_roster", index=False)
-            ghost_df.to_excel(w, sheet_name="ghost_june", index=False)
-            inc_df.to_excel(w, sheet_name="incomplete_june", index=False)
-            orph_df[ocols].to_excel(w, sheet_name="orphans_june", index=False)
+            full_df.to_excel(w, sheet_name=sheet_full, index=False)
+            ghost_df.to_excel(w, sheet_name=sheet_ghost, index=False)
+            inc_df.to_excel(w, sheet_name=sheet_inc, index=False)
+            orph_df[ocols].to_excel(w, sheet_name=sheet_orphans, index=False)
             from src.report_generator import _build_full_roster
             for wk, (r_w, _, dc_w) in sorted(week_ros.items()):
                 _build_full_roster(r_w, w_thresh_inner, dc_w).to_excel(w, sheet_name=f"week_{wk.date()}", index=False)
+            for sp_label, sp_full, _ in sp_ros:
+                sp_slug = sp_label.strip().split()[0].lower()
+                sp_full.to_excel(w, sheet_name=f"{sp_slug}_full_roster", index=False)
         return buf.getvalue()
 
     label_safe = month_label.replace(" ", "_").replace("/", "-")
     st.download_button(f"Download Compliance Report — {month_label}",
-                       data=_monthly_bytes(full, ghost, incomplete, orphans, week_rosters, week_threshold),
+                       data=_monthly_bytes(full, ghost, incomplete, orphans, week_rosters, week_threshold, sub_period_rosters),
                        file_name=f"compliance_{label_safe}_{_TS}.xlsx", mime=_MIME, use_container_width=True)
 
 

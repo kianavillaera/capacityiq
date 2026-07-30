@@ -70,18 +70,26 @@ def export_fte_workbook(fte_results: dict, output_path: Path) -> None:
 
     logger.info("FTE workbook written: %s", output_path)
 
-def export_timecard_data(df: pd.DataFrame, output_path: Path) -> None:
-    """Export time-card data with two sheets: with_gen and without_gen."""
+def export_timecard_data(df: pd.DataFrame, output_path: Path,
+                         oncall_df: "pd.DataFrame | None" = None) -> None:
+    """Export time-card data with two sheets: with_gen and without_gen.
+
+    If oncall_df is supplied it is saved to a third 'oncall' sheet so the
+    compliance pipeline can track hours_oncall without reading raw XLS files.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="with_gen", index=False)
         df[~df["is_gen"]].to_excel(writer, sheet_name="without_gen", index=False)
+        if oncall_df is not None and not oncall_df.empty:
+            oncall_df.to_excel(writer, sheet_name="oncall", index=False)
 
     logger.info(
-        "Timecard data written: %s  (with_gen=%d  without_gen=%d)",
+        "Timecard data written: %s  (with_gen=%d  without_gen=%d  oncall=%d)",
         output_path, len(df), (~df["is_gen"]).sum(),
+        len(oncall_df) if oncall_df is not None else 0,
     )
 
 def df_to_excel_bytes(df: pd.DataFrame) -> bytes:

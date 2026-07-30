@@ -1,7 +1,21 @@
-"""Central configuration -- paths, thresholds, and constants."""
+"""Central configuration -- paths, thresholds, and constants.
 
+Sensitive values (roster sheet name, UID overrides, exception names) are loaded
+from a local .env file so they are never committed to source control.
+Copy .env.example → .env and fill in your values before running the pipeline.
+"""
+
+import json
+import os
 from pathlib import Path
 from datetime import datetime
+
+# Load .env from the project root (silently ignored if the file doesn't exist).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass  # dotenv not installed — fall back to env vars already in the shell
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,7 +35,19 @@ REPLICON_DIR = INPUT_DIR / "replicon"
 SERVICENOW_FILENAME_PATTERN = "time_card*.xls*"
 
 RESOURCES_FILE = INPUT_DIR / "Resources.xlsx"
-RESOURCES_SHEET = "Resource List 20250206"
+
+# ── Sensitive values — loaded from .env (see .env.example) ────────────────────
+# Sheet name inside Resources.xlsx that contains the roster.
+RESOURCES_SHEET: str = os.getenv("RESOURCES_SHEET", "Resource List")
+
+# JSON object: ServiceNow User ID → exact roster Name.
+# Add an entry whenever someone's email-derived UID differs from their TC User ID.
+UID_OVERRIDES: dict = json.loads(os.getenv("UID_OVERRIDES", "{}"))
+
+# JSON array of first-name strings for members on reduced-hours arrangements.
+# These members are Compliant if they log any hours at all (threshold does not apply).
+PARTIAL_HOURS_EXCEPTIONS: list = json.loads(os.getenv("PARTIAL_HOURS_EXCEPTIONS", "[]"))
+# ──────────────────────────────────────────────────────────────────────────────
 
 # If this file exists it overrides the auto-generated fuzzy matches.
 # Export the auto-generated mapping, correct any wrong rows, save under
@@ -60,12 +86,6 @@ TECH_MAP: dict = {
 
 # Graph 2 (no-GEN) counts Task work and Sick/Holiday as billable task hours.
 TASK_CATEGORIES: list = ["Task work", "Sick/Holiday"]
-
-# Manual overrides for users whose time-card UID does not match their roster entry.
-UID_OVERRIDES: dict = {
-    "amitkumar.singh": "Singh, Amit Kumar",
-    "sravan.boini": "Kumar, Boini Sravan",
-}
 
 TIMESTAMP: str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
