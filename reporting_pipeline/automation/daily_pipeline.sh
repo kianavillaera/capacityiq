@@ -171,14 +171,37 @@ result = run_monthly_attendance_pipeline(
 print(result['output_path'])
 " 2>&1 | tee -a "$LOG_FILE"
 
-# ── Copy monthly report to SharePoint ────────────────────────────────────────
-SHAREPOINT_TIMECARD="$SHAREPOINT_SYNC_ROOT/Managed Services/timecard_data"
-mkdir -p "$SHAREPOINT_TIMECARD"
+# ── Publish monthly report + FTE files to SharePoint (archive old → history/) ─
+log "Publishing outputs to SharePoint..."
 
-LATEST_MONTHLY=$(ls -t "$PIPELINE_DIR/outputs/reports/compliance_Jun-"*.xlsx 2>/dev/null | head -1)
-if [[ -n "$LATEST_MONTHLY" ]]; then
-    cp "$LATEST_MONTHLY" "$SHAREPOINT_TIMECARD/compliance_report.xlsx"
-    log "Saved monthly report to SharePoint: $SHAREPOINT_TIMECARD/compliance_report.xlsx"
-fi
+$PYTHON -c "
+import sys; sys.path.insert(0, '.')
+from pathlib import Path
+from config import settings
+from src.utils import setup_logging, publish_to_sharepoint
+
+setup_logging(settings.LOGS_DIR)
+
+sp = Path('$SHAREPOINT_SYNC_ROOT/Managed Services/timecard_data')
+
+files = {
+    'compliance_Jun-Aug_2026.xlsx': sorted(Path(settings.REPORTS_DIR).glob('compliance_Jun-*.xlsx'), key=lambda p: p.stat().st_mtime),
+    'compliance_report.xlsx':       sorted(Path(settings.REPORTS_DIR).glob('compliance_Jun-*.xlsx'), key=lambda p: p.stat().st_mtime),
+    'powerbi_fte_weekly.xlsx':      sorted(Path(settings.EXPORTS_DIR).glob('powerbi_fte_weekly_*.xlsx'), key=lambda p: p.stat().st_mtime),
+    'timecard_data.xlsx':           sorted(Path(settings.EXPORTS_DIR).glob('timecard_data_*.xlsx'), key=lambda p: p.stat().st_mtime),
+}
+
+ts = settings.TIMESTAMP
+for dest_name, candidates in files.items():
+    if not candidates:
+        print(f'  SKIP {dest_name} — no source file found')
+        continue
+    src = candidates[-1]
+    result = publish_to_sharepoint(src, sp, timestamp=ts, dest_name=dest_name)
+    if result:
+        print(f'  ✓ {dest_name}')
+    else:
+        print(f'  SKIP {dest_name} — SharePoint dir not accessible')
+" 2>&1 | tee -a "$LOG_FILE"
 
 log "=== Daily pipeline complete ==="
