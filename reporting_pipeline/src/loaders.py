@@ -1,5 +1,6 @@
 """Data loaders. Returns uncleaned DataFrames for the pipeline."""
 
+import base64
 import io
 import logging
 from collections.abc import Sequence
@@ -83,12 +84,33 @@ def load_approved_mapping(path: str | Path) -> "pd.DataFrame | None":
     return df
 
 
+def _open_excel_sheets(p: Path) -> dict:
+    """Open an Excel file returning {sheet_name: DataFrame}. Handles .xls files
+    that are base64-encoded OLE2 (a known ServiceNow export quirk)."""
+    if p.suffix.lower() == ".xls":
+        with open(p, "rb") as f:
+            raw = f.read(8)
+        # OLE2 magic starts with D0 CF; if missing, try base64 decode
+        if raw[:2] != b"\xd0\xcf":
+            try:
+                decoded = base64.b64decode(open(p, "rb").read())
+                return pd.read_excel(io.BytesIO(decoded), sheet_name=None, engine="xlrd")
+            except Exception:
+                pass
+        try:
+            return pd.read_excel(p, sheet_name=None, engine="xlrd")
+        except Exception:
+            return pd.read_excel(p, sheet_name=None, engine="openpyxl")
+    return pd.read_excel(p, sheet_name=None)
+
+
 def load_timecard_multi(paths: Sequence[str | Path]) -> pd.DataFrame:
     """Load multiple time-card files for the FTE pipeline. Adds week_start column."""
     frames = []
     for p in paths:
         p = Path(p)
-        df = pd.concat(pd.read_excel(p, sheet_name=None).values(), ignore_index=True)
+        sheets = _open_excel_sheets(p)
+        df = pd.concat(sheets.values(), ignore_index=True)
         df["_source_file"] = p.name
         frames.append(df)
     result = pd.concat(frames, ignore_index=True)

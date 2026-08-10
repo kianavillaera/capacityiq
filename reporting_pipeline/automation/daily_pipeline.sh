@@ -54,8 +54,7 @@ while IFS= read -r -d '' f; do
 done < <(find "$EXTRACTS_DIR" -maxdepth 3 -iname "IQ Time card*.xls*" -print0 2>/dev/null)
 
 if [[ ${#NEW_FILES[@]} -eq 0 ]]; then
-    log "No new files found. Exiting."
-    exit 0
+    log "No new files — skipping copy step, running pipeline anyway."
 fi
 
 # ── Copy new files to input with time_card_ prefix ───────────────────────────
@@ -107,6 +106,79 @@ LATEST_REPORT=$(ls -t "$PIPELINE_DIR/outputs/reports/compliance_2026-"*.xlsx 2>/
 if [[ -n "$LATEST_REPORT" ]]; then
     cp "$LATEST_REPORT" "$SHAREPOINT_REPORTS/compliance_daily_${REPORT_DATE}.xlsx"
     log "Saved to SharePoint: $SHAREPOINT_REPORTS/compliance_daily_${REPORT_DATE}.xlsx"
+fi
+
+# ── Rebuild timecard_data.xlsx from all input files (FTE pipeline) ────────────
+log "Rebuilding timecard_data.xlsx from latest inputs..."
+
+$PYTHON -c "
+import sys; sys.path.insert(0, '.')
+from config import settings
+from src.utils import setup_logging
+from src.pipeline import run_fte_pipeline
+
+setup_logging(settings.LOGS_DIR)
+
+# Use only the most recent daily extract — it is already a full rolling snapshot
+# from the start of the reporting period. Including older/merged files causes
+# double-counting because the same rows appear across multiple extracts.
+all_files = sorted(
+    (p for p in settings.INPUT_DIR.glob(settings.SERVICENOW_FILENAME_PATTERN)
+     if ':' not in p.name),
+    key=lambda p: p.stat().st_mtime,
+)
+tc_paths = [all_files[-1]] if all_files else []
+run_fte_pipeline(
+    timecard_paths=tc_paths,
+    output_dir=settings.EXPORTS_DIR,
+    timestamp=settings.TIMESTAMP,
+)
+" 2>&1 | tee -a "$LOG_FILE"
+
+# ── Run monthly compliance pipeline (June → today) ───────────────────────────
+log "Running monthly compliance pipeline..."
+
+$PYTHON -c "
+import sys; sys.path.insert(0, '.')
+import pandas as pd
+from datetime import date
+from config import settings
+from src.utils import setup_logging
+from src.pipeline import run_monthly_attendance_pipeline, _auto_sub_periods
+
+setup_logging(settings.LOGS_DIR)
+
+tc_path = max(settings.EXPORTS_DIR.glob('timecard_data_*.xlsx'), key=lambda p: p.stat().st_mtime)
+month_start = pd.Timestamp('2026-06-01')
+month_end   = pd.Timestamp(date.today())
+s = month_start.strftime('%b')
+e = month_end.strftime('%b %Y')
+month_label = e if month_start.strftime('%b %Y') == e else f'{s}-{e}'
+sub_periods = _auto_sub_periods(month_start, month_end)
+
+result = run_monthly_attendance_pipeline(
+    timecard_data_path=tc_path,
+    resources_path=settings.RESOURCES_FILE,
+    month_start=month_start,
+    month_end=month_end,
+    month_label=month_label,
+    sub_periods=sub_periods,
+    output_dir=settings.REPORTS_DIR,
+    resources_sheet=settings.RESOURCES_SHEET,
+    hours_threshold=settings.HOURS_THRESHOLD_WEEKLY,
+    timestamp=settings.TIMESTAMP,
+)
+print(result['output_path'])
+" 2>&1 | tee -a "$LOG_FILE"
+
+# ── Copy monthly report to SharePoint ────────────────────────────────────────
+SHAREPOINT_TIMECARD="$SHAREPOINT_SYNC_ROOT/Managed Services/timecard_data"
+mkdir -p "$SHAREPOINT_TIMECARD"
+
+LATEST_MONTHLY=$(ls -t "$PIPELINE_DIR/outputs/reports/compliance_Jun-"*.xlsx 2>/dev/null | head -1)
+if [[ -n "$LATEST_MONTHLY" ]]; then
+    cp "$LATEST_MONTHLY" "$SHAREPOINT_TIMECARD/compliance_report.xlsx"
+    log "Saved monthly report to SharePoint: $SHAREPOINT_TIMECARD/compliance_report.xlsx"
 fi
 
 log "=== Daily pipeline complete ==="
