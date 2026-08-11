@@ -102,7 +102,7 @@ print(result['output_path'])
 REPORT_DATE=$(date '+%Y-%m-%d')
 mkdir -p "$SHAREPOINT_REPORTS"
 
-LATEST_REPORT=$(ls -t "$PIPELINE_DIR/outputs/reports/compliance_2026-"*.xlsx 2>/dev/null | head -1)
+LATEST_REPORT=$(ls -t "$PIPELINE_DIR/outputs/reports/compliance_report.xlsx" 2>/dev/null | head -1)
 if [[ -n "$LATEST_REPORT" ]]; then
     cp "$LATEST_REPORT" "$SHAREPOINT_REPORTS/compliance_daily_${REPORT_DATE}.xlsx"
     log "Saved to SharePoint: $SHAREPOINT_REPORTS/compliance_daily_${REPORT_DATE}.xlsx"
@@ -113,26 +113,59 @@ log "Rebuilding timecard_data.xlsx from latest inputs..."
 
 $PYTHON -c "
 import sys; sys.path.insert(0, '.')
+import pandas as pd
+from pathlib import Path
 from config import settings
 from src.utils import setup_logging
 from src.pipeline import run_fte_pipeline
 
 setup_logging(settings.LOGS_DIR)
 
-# Use only the most recent daily extract — it is already a full rolling snapshot
-# from the start of the reporting period. Including older/merged files causes
-# double-counting because the same rows appear across multiple extracts.
-all_files = sorted(
+# Strategy: use the merged historical file (2024 → Aug 2026) as the base for
+# full FTE history, and supplement with only the rows from the latest daily
+# extract that are NEWER than the merged file's max date — avoiding any overlap
+# that would cause double-counting.
+MERGED = settings.INPUT_DIR / 'time_card_merged_2024_to_aug2026.xlsx'
+
+all_daily = sorted(
     (p for p in settings.INPUT_DIR.glob(settings.SERVICENOW_FILENAME_PATTERN)
-     if ':' not in p.name),
+     if ':' not in p.name and p.name != MERGED.name),
     key=lambda p: p.stat().st_mtime,
 )
-tc_paths = [all_files[-1]] if all_files else []
+latest_daily = all_daily[-1] if all_daily else None
+
+if MERGED.exists() and latest_daily:
+    # Find the max date already covered by the merged file
+    merged_max = pd.to_datetime(
+        pd.read_excel(MERGED, usecols=['Date'])['Date'], errors='coerce'
+    ).max()
+    # Load daily extract; keep only rows strictly after merged_max
+    daily_df = pd.read_excel(latest_daily)
+    daily_df['Date'] = pd.to_datetime(daily_df['Date'], errors='coerce')
+    new_rows = daily_df[daily_df['Date'] > merged_max]
+    if new_rows.empty:
+        tc_paths = [MERGED]
+    else:
+        # Write the delta to a temp file so run_fte_pipeline can load it
+        delta_path = settings.INPUT_DIR / '_delta_new_rows.xlsx'
+        new_rows.to_excel(delta_path, index=False)
+        tc_paths = [MERGED, delta_path]
+    print(f'FTE inputs: merged ({merged_max.date()}) + {len(new_rows)} new rows from {latest_daily.name}')
+elif MERGED.exists():
+    tc_paths = [MERGED]
+else:
+    tc_paths = [latest_daily] if latest_daily else []
+
 run_fte_pipeline(
     timecard_paths=tc_paths,
     output_dir=settings.EXPORTS_DIR,
     timestamp=settings.TIMESTAMP,
 )
+
+# Clean up temp delta file
+delta = settings.INPUT_DIR / '_delta_new_rows.xlsx'
+if delta.exists():
+    delta.unlink()
 " 2>&1 | tee -a "$LOG_FILE"
 
 # ── Run monthly compliance pipeline (June → today) ───────────────────────────
@@ -148,7 +181,7 @@ from src.pipeline import run_monthly_attendance_pipeline, _auto_sub_periods
 
 setup_logging(settings.LOGS_DIR)
 
-tc_path = max(settings.EXPORTS_DIR.glob('timecard_data_*.xlsx'), key=lambda p: p.stat().st_mtime)
+tc_path = max(settings.EXPORTS_DIR.glob('timecard_data.xlsx'), key=lambda p: p.stat().st_mtime)
 month_start = pd.Timestamp('2026-06-01')
 month_end   = pd.Timestamp(date.today())
 s = month_start.strftime('%b')
@@ -185,10 +218,9 @@ setup_logging(settings.LOGS_DIR)
 sp = Path('$SHAREPOINT_SYNC_ROOT/Managed Services/timecard_data')
 
 files = {
-    'compliance_Jun-Aug_2026.xlsx': sorted(Path(settings.REPORTS_DIR).glob('compliance_Jun-*.xlsx'), key=lambda p: p.stat().st_mtime),
-    'compliance_report.xlsx':       sorted(Path(settings.REPORTS_DIR).glob('compliance_Jun-*.xlsx'), key=lambda p: p.stat().st_mtime),
-    'powerbi_fte_weekly.xlsx':      sorted(Path(settings.EXPORTS_DIR).glob('powerbi_fte_weekly_*.xlsx'), key=lambda p: p.stat().st_mtime),
-    'timecard_data.xlsx':           sorted(Path(settings.EXPORTS_DIR).glob('timecard_data_*.xlsx'), key=lambda p: p.stat().st_mtime),
+    'compliance_report.xlsx':       sorted(Path(settings.REPORTS_DIR).glob('compliance_report.xlsx'), key=lambda p: p.stat().st_mtime),
+    'powerbi_fte_weekly.xlsx':      sorted(Path(settings.EXPORTS_DIR).glob('powerbi_fte_weekly.xlsx'), key=lambda p: p.stat().st_mtime),
+    'timecard_data.xlsx':           sorted(Path(settings.EXPORTS_DIR).glob('timecard_data.xlsx'), key=lambda p: p.stat().st_mtime),
 }
 
 ts = settings.TIMESTAMP
