@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Distribution / packaging
+.eggs/
+*.egg-info/
+*.dist-info/
+
+# Testing
+.tox/
+.nox/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+outputs/coverage_html/
+
+# Mutation testing
+.mutmut-cache
+mutants/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Logs
+outputs/logs/*.log
+
+# Sensitive input data (do not commit source files)
+data/input/*.xls
+data/input/*.xlsx
+data/input/*.csv
+data/input/replicon/
+
+# Output files (generated — do not commit)
+outputs/reports/
+outputs/exports/
+
+# Secrets / credentials
+*.env
+.env
+secrets.py
+REFACTOR_SUMMARY.md
+
+# Automation runtime artefacts
+automation/*.log
